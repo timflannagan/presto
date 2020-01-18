@@ -89,7 +89,7 @@ FROM centos:7
 COPY faq.repo /etc/yum.repos.d/ecnahc515-faq-epel-7.repo
 
 RUN set -x; \
-    INSTALL_PKGS="java-1.8.0-openjdk java-1.8.0-openjdk-devel openssl less rsync faq" \
+    INSTALL_PKGS="java-1.8.0-openjdk java-1.8.0-openjdk-devel openssl net-tools less rsync faq" \
     && yum clean all \
     && rm -rf /var/cache/yum/* \
     && yum -y install epel-release \
