@@ -133,6 +133,10 @@ RUN chown -R 1003:0 /opt/presto /etc/passwd $JAVA_HOME/lib/security/cacerts && \
     chmod -R 774 /etc/passwd $JAVA_HOME/lib/security/cacerts && \
     chmod -R 775 /opt/presto
 
+RUN chown -R 1003:0 /opt/presto $JAVA_HOME/lib/security/cacerts && \
+    chmod -R 774 $JAVA_HOME/lib/security/cacerts && \
+    chmod -R 775 /opt/presto
+
 USER 1003
 EXPOSE 8080
 WORKDIR $PRESTO_HOME
