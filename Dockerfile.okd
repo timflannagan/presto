@@ -44,7 +44,6 @@ COPY presto-record-decoder /build/presto-record-decoder
 COPY presto-tpcds /build/presto-tpcds
 COPY presto-plugin-toolkit /build/presto-plugin-toolkit
 COPY presto-spi /build/presto-spi
-COPY presto-prometheus /build/presto-prometheus
 COPY presto-thrift-testing-server /build/presto-thrift-testing-server
 COPY presto-cli /build/presto-cli
 COPY presto-hive /build/presto-hive
@@ -75,7 +74,10 @@ COPY presto-kudu /build/presto-kudu
 COPY presto-main /build/presto-main
 COPY presto-raptor-legacy /build/presto-raptor-legacy
 COPY presto-password-authenticators /build/presto-password-authenticators
+COPY presto-memsql /build/presto-memsql
+COPY presto-testing /build/presto-testing
 COPY src /build/src
+COPY src/modernizer/violations.xml /build/src/modernized/violations.xml
 COPY pom.xml /build/pom.xml
 
 # build presto
@@ -103,7 +105,7 @@ RUN chmod +x /usr/bin/tini
 
 RUN mkdir -p /opt/presto
 
-ENV PRESTO_VERSION 322
+ENV PRESTO_VERSION 328
 ENV PRESTO_HOME /opt/presto/presto-server
 ENV PRESTO_CLI /opt/presto/presto-cli
 ENV PROMETHEUS_JMX_EXPORTER /opt/jmx_exporter/jmx_exporter.jar
@@ -113,8 +115,8 @@ ENV JAVA_HOME=/etc/alternatives/jre
 
 RUN mkdir -p $PRESTO_HOME
 
-COPY --from=build /build/presto-server/target/presto-server-$PRESTO_VERSION $PRESTO_HOME
-COPY --from=build /build/presto-cli/target/presto-cli-$PRESTO_VERSION-executable.jar $PRESTO_CLI
+COPY --from=build /build/presto-server/target/presto-server-328 $PRESTO_HOME
+COPY --from=build /build/presto-cli/target/presto-cli-328-executable.jar $PRESTO_CLI
 COPY --from=build /build/jmx_prometheus_javaagent.jar $PROMETHEUS_JMX_EXPORTER
 
 # https://docs.oracle.com/javase/7/docs/technotes/guides/net/properties.html
