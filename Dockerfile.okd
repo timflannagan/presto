@@ -113,8 +113,6 @@ ENV JAVA_HOME=/etc/alternatives/jre
 
 RUN mkdir -p $PRESTO_HOME
 
-RUN useradd presto -m -u 1003 -d /opt/presto
-
 COPY --from=build /build/presto-server/target/presto-server-$PRESTO_VERSION $PRESTO_HOME
 COPY --from=build /build/presto-cli/target/presto-cli-$PRESTO_VERSION-executable.jar $PRESTO_CLI
 COPY --from=build /build/jmx_prometheus_javaagent.jar $PROMETHEUS_JMX_EXPORTER
@@ -126,11 +124,11 @@ RUN sed -i '/networkaddress.cache.negative.ttl/d' $JAVA_HOME/lib/security/java.s
 RUN echo 'networkaddress.cache.ttl=0' >> $JAVA_HOME/lib/security/java.security
 RUN echo 'networkaddress.cache.negative.ttl=0' >> $JAVA_HOME/lib/security/java.security
 
-RUN ln $PRESTO_CLI /usr/local/bin/presto-cli \
-        && chmod 755 /usr/local/bin/presto-cli
+RUN ln $PRESTO_CLI /usr/local/bin/presto-cli && \
+    chmod 755 /usr/local/bin/presto-cli
 
-RUN chown -R 1003:0 /opt/presto /etc/passwd $JAVA_HOME/lib/security/cacerts && \
-    chmod -R 774 /etc/passwd $JAVA_HOME/lib/security/cacerts && \
+RUN chown -R 1003:0 /opt/presto $JAVA_HOME/lib/security/cacerts && \
+    chmod -R 774 $JAVA_HOME/lib/security/cacerts && \
     chmod -R 775 /opt/presto
 
 USER 1003
