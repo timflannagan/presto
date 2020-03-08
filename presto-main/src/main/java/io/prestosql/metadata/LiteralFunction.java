@@ -46,32 +46,20 @@ public class LiteralFunction
 
     public LiteralFunction()
     {
-        super(new Signature(
-                LITERAL_FUNCTION_NAME,
-                SCALAR,
-                ImmutableList.of(typeVariable("F"), typeVariable("T")),
-                ImmutableList.of(),
-                new TypeSignature("T"),
-                ImmutableList.of(new TypeSignature("F")),
-                false));
-    }
-
-    @Override
-    public boolean isHidden()
-    {
-        return true;
-    }
-
-    @Override
-    public boolean isDeterministic()
-    {
-        return true;
-    }
-
-    @Override
-    public String getDescription()
-    {
-        return "literal";
+        super(new FunctionMetadata(
+                new Signature(
+                        LITERAL_FUNCTION_NAME,
+                        ImmutableList.of(typeVariable("F"), typeVariable("T")),
+                        ImmutableList.of(),
+                        new TypeSignature("T"),
+                        ImmutableList.of(new TypeSignature("F")),
+                        false),
+                false,
+                ImmutableList.of(new FunctionArgumentDefinition(false)),
+                true,
+                true,
+                "literal",
+                SCALAR));
     }
 
     @Override
@@ -100,8 +88,7 @@ public class LiteralFunction
         return new ScalarFunctionImplementation(
                 false,
                 ImmutableList.of(valueTypeArgumentProperty(RETURN_NULL_ON_NULL)),
-                methodHandle,
-                isDeterministic());
+                methodHandle);
     }
 
     public static boolean isSupportedLiteralType(Type type)

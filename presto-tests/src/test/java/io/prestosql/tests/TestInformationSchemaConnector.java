@@ -22,6 +22,8 @@ import io.prestosql.plugin.tpch.TpchPlugin;
 import io.prestosql.spi.Plugin;
 import io.prestosql.spi.connector.ConnectorFactory;
 import io.prestosql.spi.connector.SchemaTableName;
+import io.prestosql.testing.AbstractTestQueryFramework;
+import io.prestosql.testing.DistributedQueryRunner;
 import org.testng.annotations.Test;
 
 import java.util.Arrays;
@@ -44,11 +46,6 @@ public class TestInformationSchemaConnector
     private static final AtomicLong LIST_SCHEMAS_CALLS_COUNTER = new AtomicLong();
     private static final AtomicLong LIST_TABLES_CALLS_COUNTER = new AtomicLong();
     private static final AtomicLong GET_COLUMNS_CALLS_COUNTER = new AtomicLong();
-
-    public TestInformationSchemaConnector()
-    {
-        super(TestInformationSchemaConnector::createQueryRunner);
-    }
 
     @Test
     public void testBasic()
@@ -200,7 +197,8 @@ public class TestInformationSchemaConnector
                         .withGetColumnsCount(10008));
     }
 
-    private static DistributedQueryRunner createQueryRunner()
+    @Override
+    protected DistributedQueryRunner createQueryRunner()
             throws Exception
     {
         Session session = testSessionBuilder().build();

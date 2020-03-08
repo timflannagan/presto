@@ -132,7 +132,7 @@ public class TestOrcPageSourceMemoryTracking
 {
     private static final String ORC_RECORD_WRITER = OrcOutputFormat.class.getName() + "$OrcRecordWriter";
     private static final Constructor<? extends RecordWriter> WRITER_CONSTRUCTOR = getOrcWriterConstructor();
-    private static final Configuration CONFIGURATION = new Configuration();
+    private static final Configuration CONFIGURATION = new Configuration(false);
     private static final int NUM_ROWS = 50000;
     private static final int STRIPE_ROWS = 20000;
     private static final Metadata metadata = createTestMetadataManager();
@@ -474,11 +474,11 @@ public class TestOrcPageSourceMemoryTracking
 
         public ConnectorPageSource newPageSource(FileFormatDataSourceStats stats, ConnectorSession session)
         {
-            OrcPageSourceFactory orcPageSourceFactory = new OrcPageSourceFactory(false, new OrcReaderOptions(), HDFS_ENVIRONMENT, stats);
+            OrcPageSourceFactory orcPageSourceFactory = new OrcPageSourceFactory(new OrcReaderOptions(), HDFS_ENVIRONMENT, stats);
             return HivePageSourceProvider.createHivePageSource(
-                    ImmutableSet.of(),
                     ImmutableSet.of(orcPageSourceFactory),
-                    new Configuration(),
+                    ImmutableSet.of(),
+                    new Configuration(false),
                     session,
                     fileSplit.getPath(),
                     OptionalInt.empty(),
@@ -506,7 +506,7 @@ public class TestOrcPageSourceMemoryTracking
                     new PlanNodeId("0"),
                     (session, split, table, columnHandles, dynamicFilter) -> pageSource,
                     TEST_TABLE_HANDLE,
-                    columns.stream().map(columnHandle -> (ColumnHandle) columnHandle).collect(toList()));
+                    columns.stream().map(columnHandle -> (ColumnHandle) columnHandle).collect(toImmutableList()));
             SourceOperator operator = sourceOperatorFactory.createOperator(driverContext);
             operator.addSplit(new Split(new CatalogName("test"), TestingSplit.createLocalSplit(), Lifespan.taskWide()));
             return operator;
@@ -530,7 +530,7 @@ public class TestOrcPageSourceMemoryTracking
                     pageProcessor,
                     TEST_TABLE_HANDLE,
                     columns.stream().map(columnHandle -> (ColumnHandle) columnHandle).collect(toList()),
-                    null,
+                    TupleDomain::all,
                     types,
                     new DataSize(0, BYTE),
                     0);
@@ -548,7 +548,8 @@ public class TestOrcPageSourceMemoryTracking
         }
     }
 
-    public static FileSplit createTestFile(String filePath,
+    public static FileSplit createTestFile(
+            String filePath,
             HiveOutputFormat<?, ?> outputFormat,
             Serializer serializer,
             String compressionCodec,

@@ -24,6 +24,7 @@ import io.prestosql.spi.connector.CatalogSchemaTableName;
 import io.prestosql.spi.type.Type;
 import io.prestosql.sql.planner.planprinter.IoPlanPrinter;
 import io.prestosql.sql.planner.planprinter.IoPlanPrinter.EstimatedStatsAndCost;
+import io.prestosql.testing.AbstractTestQueries;
 import io.prestosql.testing.MaterializedResult;
 import io.prestosql.tests.tpch.TpchQueryRunnerBuilder;
 import io.prestosql.type.TypeDeserializer;
@@ -48,7 +49,8 @@ public class TestTpchDistributedQueries
     }
 
     @Test
-    public void testIOExplain()
+    @Override
+    public void testIoExplain()
     {
         String query = "SELECT * FROM orders";
         MaterializedResult result = computeActual("EXPLAIN (TYPE IO, FORMAT JSON) " + query);
@@ -133,6 +135,8 @@ public class TestTpchDistributedQueries
         assertTrue(sampleSizeFound, "Table sample returned unexpected number of rows");
     }
 
+    @Test
+    @Override
     public void testShowTables()
     {
         assertQuerySucceeds(createSession("sf1"), "SHOW TABLES");
@@ -140,6 +144,26 @@ public class TestTpchDistributedQueries
         assertQuerySucceeds("SHOW TABLES FROM sf1");
         assertQuerySucceeds("SHOW TABLES FROM \"sf1.0\"");
         assertQueryFails("SHOW TABLES FROM sf0", "line 1:1: Schema 'sf0' does not exist");
+    }
+
+    @Test
+    public void testRowSubscriptWithReservedKeyword()
+    {
+        // Subscript over field named after reserved keyword. This test needs to run in distributed
+        // mode, as it uncovers a problem during deserialization plan expressions
+        assertQuery(
+                "SELECT cast(row(1) AS row(\"cross\" bigint))[1]",
+                "VALUES 1");
+    }
+
+    @Test
+    public void testRowTypeWithReservedKeyword()
+    {
+        // This test is here because it only reproduces the issue (https://github.com/prestosql/presto/issues/1962)
+        // when running in distributed mode
+        assertQuery(
+                "SELECT cast(row(1) AS row(\"cross\" bigint)).\"cross\"",
+                "VALUES 1");
     }
 
     private Session createSession(String schemaName)

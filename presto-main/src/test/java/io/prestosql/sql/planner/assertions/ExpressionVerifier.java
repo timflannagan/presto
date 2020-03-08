@@ -27,6 +27,7 @@ import io.prestosql.sql.tree.DoubleLiteral;
 import io.prestosql.sql.tree.Expression;
 import io.prestosql.sql.tree.FunctionCall;
 import io.prestosql.sql.tree.GenericLiteral;
+import io.prestosql.sql.tree.IfExpression;
 import io.prestosql.sql.tree.InListExpression;
 import io.prestosql.sql.tree.InPredicate;
 import io.prestosql.sql.tree.IsNotNullPredicate;
@@ -213,6 +214,20 @@ public final class ExpressionVerifier
     }
 
     @Override
+    protected Boolean visitIfExpression(IfExpression actual, Node expectedExpression)
+    {
+        if (!(expectedExpression instanceof IfExpression)) {
+            return false;
+        }
+
+        IfExpression expected = (IfExpression) expectedExpression;
+
+        return process(actual.getCondition(), expected.getCondition())
+                && process(actual.getTrueValue(), expected.getTrueValue())
+                && process(actual.getFalseValue(), expected.getFalseValue());
+    }
+
+    @Override
     protected Boolean visitCast(Cast actual, Node expectedExpression)
     {
         if (!(expectedExpression instanceof Cast)) {
@@ -221,7 +236,11 @@ public final class ExpressionVerifier
 
         Cast expected = (Cast) expectedExpression;
 
-        if (!actual.getType().equals(expected.getType())) {
+        // TODO: hack!! The type in Cast is an AST structure, subject to case-sensitivity and quoting rules
+        // Here we're trying to verify its IR counterpart, but the plan testing framework goes directly
+        // from SQL text -> IR-like expressions without doing all the proper canonicalizations. So we cheat
+        // here and normalize everything to the same case before comparing
+        if (!actual.getType().toString().equalsIgnoreCase(expected.getType().toString())) {
             return false;
         }
 
@@ -510,6 +529,7 @@ public final class ExpressionVerifier
         return process(actual.getInnerExpression(), expected.getInnerExpression());
     }
 
+    @Override
     protected Boolean visitLikePredicate(LikePredicate actual, Node expectedExpression)
     {
         if (!(expectedExpression instanceof LikePredicate)) {

@@ -63,7 +63,12 @@ public class RowIndeterminateOperator
 
     private RowIndeterminateOperator()
     {
-        super(INDETERMINATE, ImmutableList.of(withVariadicBound("T", "row")), ImmutableList.of(), BOOLEAN.getTypeSignature(), ImmutableList.of(new TypeSignature("T")));
+        super(INDETERMINATE,
+                ImmutableList.of(withVariadicBound("T", "row")),
+                ImmutableList.of(),
+                BOOLEAN.getTypeSignature(),
+                ImmutableList.of(new TypeSignature("T")),
+                false);
     }
 
     @Override
@@ -76,8 +81,7 @@ public class RowIndeterminateOperator
         return new ScalarFunctionImplementation(
                 false,
                 ImmutableList.of(valueTypeArgumentProperty(USE_NULL_FLAG)),
-                indeterminateMethod,
-                isDeterministic());
+                indeterminateMethod);
     }
 
     private static Class<?> generateIndeterminate(Type type, Metadata metadata)

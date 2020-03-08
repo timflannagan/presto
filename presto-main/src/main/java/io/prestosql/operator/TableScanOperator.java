@@ -25,6 +25,7 @@ import io.prestosql.spi.Page;
 import io.prestosql.spi.connector.ColumnHandle;
 import io.prestosql.spi.connector.ConnectorPageSource;
 import io.prestosql.spi.connector.UpdatablePageSource;
+import io.prestosql.spi.predicate.TupleDomain;
 import io.prestosql.split.EmptySplit;
 import io.prestosql.split.EmptySplitPageSource;
 import io.prestosql.split.PageSourceProvider;
@@ -270,7 +271,7 @@ public class TableScanOperator
     @Override
     public void addInput(Page page)
     {
-        throw new UnsupportedOperationException(getClass().getName() + " can not take input");
+        throw new UnsupportedOperationException(getClass().getName() + " cannot take input");
     }
 
     @Override
@@ -280,7 +281,7 @@ public class TableScanOperator
             return null;
         }
         if (source == null) {
-            source = pageSourceProvider.createPageSource(operatorContext.getSession(), split, table, columns, null);
+            source = pageSourceProvider.createPageSource(operatorContext.getSession(), split, table, columns, TupleDomain::all);
         }
 
         Page page = source.getNextPage();

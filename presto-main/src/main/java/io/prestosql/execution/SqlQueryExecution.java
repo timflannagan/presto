@@ -334,9 +334,6 @@ public class SqlQueryExecution
                 }
 
                 PlanRoot plan = planQuery();
-
-                metadata.beginQuery(getSession(), plan.getTableHandles());
-
                 planDistribution(plan);
 
                 if (!stateMachine.transitionToStarting()) {
@@ -656,7 +653,8 @@ public class SqlQueryExecution
         private final CostCalculator costCalculator;
 
         @Inject
-        SqlQueryExecutionFactory(QueryManagerConfig config,
+        SqlQueryExecutionFactory(
+                QueryManagerConfig config,
                 Metadata metadata,
                 AccessControl accessControl,
                 SqlParser sqlParser,

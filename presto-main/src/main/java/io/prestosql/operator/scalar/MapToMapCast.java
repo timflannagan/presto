@@ -35,6 +35,7 @@ import java.lang.invoke.MethodHandles;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.primitives.Primitives.unwrap;
+import static io.prestosql.metadata.Signature.castableToTypeParameter;
 import static io.prestosql.metadata.Signature.typeVariable;
 import static io.prestosql.operator.scalar.ScalarFunctionImplementation.ArgumentProperty.valueTypeArgumentProperty;
 import static io.prestosql.operator.scalar.ScalarFunctionImplementation.NullConvention.RETURN_NULL_ON_NULL;
@@ -72,10 +73,15 @@ public final class MapToMapCast
     public MapToMapCast()
     {
         super(CAST,
-                ImmutableList.of(typeVariable("FK"), typeVariable("FV"), typeVariable("TK"), typeVariable("TV")),
+                ImmutableList.of(
+                        castableToTypeParameter("FK", new TypeSignature("TK")),
+                        castableToTypeParameter("FV", new TypeSignature("TV")),
+                        typeVariable("TK"),
+                        typeVariable("TV")),
                 ImmutableList.of(),
                 mapType(new TypeSignature("TK"), new TypeSignature("TV")),
-                ImmutableList.of(mapType(new TypeSignature("FK"), new TypeSignature("FV"))));
+                ImmutableList.of(mapType(new TypeSignature("FK"), new TypeSignature("FV"))),
+                true);
     }
 
     @Override
@@ -95,7 +101,7 @@ public final class MapToMapCast
         MethodHandle keyProcessor = buildProcessor(metadata, fromKeyType, toKeyType, true);
         MethodHandle valueProcessor = buildProcessor(metadata, fromValueType, toValueType, false);
         MethodHandle target = MethodHandles.insertArguments(METHOD_HANDLE, 0, keyProcessor, valueProcessor, toMapType);
-        return new ScalarFunctionImplementation(true, ImmutableList.of(valueTypeArgumentProperty(RETURN_NULL_ON_NULL)), target, true);
+        return new ScalarFunctionImplementation(true, ImmutableList.of(valueTypeArgumentProperty(RETURN_NULL_ON_NULL)), target);
     }
 
     /**

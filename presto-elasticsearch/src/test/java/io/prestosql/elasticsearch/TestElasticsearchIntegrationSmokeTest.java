@@ -17,10 +17,11 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.io.Closer;
 import io.airlift.tpch.TpchTable;
+import io.prestosql.testing.AbstractTestIntegrationSmokeTest;
 import io.prestosql.testing.MaterializedResult;
 import io.prestosql.testing.MaterializedRow;
 import io.prestosql.testing.QueryRunner;
-import io.prestosql.tests.AbstractTestIntegrationSmokeTest;
+import org.elasticsearch.action.admin.indices.alias.IndicesAliasesRequest;
 import org.elasticsearch.common.xcontent.XContentType;
 import org.testng.annotations.AfterClass;
 import org.testng.annotations.BeforeClass;
@@ -37,6 +38,7 @@ import static io.prestosql.spi.type.VarcharType.VARCHAR;
 import static io.prestosql.testing.MaterializedResult.resultBuilder;
 import static io.prestosql.testing.assertions.Assert.assertEquals;
 import static java.lang.String.format;
+import static org.elasticsearch.client.Requests.indexAliasesRequest;
 import static org.elasticsearch.client.Requests.refreshRequest;
 
 public class TestElasticsearchIntegrationSmokeTest
@@ -75,29 +77,11 @@ public class TestElasticsearchIntegrationSmokeTest
     }
 
     @Test
+    @Override
     public void testSelectAll()
     {
         // List columns explicitly, as there's no defined order in Elasticsearch
         assertQuery("SELECT orderkey, custkey, orderstatus, totalprice, orderdate, orderpriority, clerk, shippriority, comment  FROM orders");
-    }
-
-    @Test
-    public void testRangePredicate()
-    {
-        // List columns explicitly, as there's no defined order in Elasticsearch
-        assertQuery("" +
-                "SELECT orderkey, custkey, orderstatus, totalprice, orderdate, orderpriority, clerk, shippriority, comment " +
-                "FROM orders " +
-                "WHERE orderkey BETWEEN 10 AND 50");
-    }
-
-    @Test
-    public void testMultipleRangesPredicate()
-    {
-        assertQuery("" +
-                "SELECT orderkey, custkey, orderstatus, totalprice, orderdate, orderpriority, clerk, shippriority, comment " +
-                "FROM orders " +
-                "WHERE orderkey BETWEEN 10 AND 50 OR orderkey BETWEEN 100 AND 150");
     }
 
     @Test
@@ -144,6 +128,28 @@ public class TestElasticsearchIntegrationSmokeTest
         assertQuery(
                 "SELECT name, fields.fielda, fields.fieldb FROM data",
                 "VALUES ('nestfield', 32, 'valueb')");
+    }
+
+    @Test
+    public void testEmptyObjectFields()
+    {
+        String indexName = "emptyobject";
+        index(indexName, ImmutableMap.<String, Object>builder()
+                .put("name", "stringfield")
+                .put("emptyobject", ImmutableMap.of())
+                .put("fields.fielda", 32)
+                .put("fields.fieldb", ImmutableMap.of())
+                .build());
+
+        embeddedElasticsearchNode.getClient()
+                .admin()
+                .indices()
+                .refresh(refreshRequest(indexName))
+                .actionGet();
+
+        assertQuery(
+                "SELECT name, fields.fielda FROM emptyobject",
+                "VALUES ('stringfield', 32)");
     }
 
     @Test
@@ -241,6 +247,123 @@ public class TestElasticsearchIntegrationSmokeTest
     }
 
     @Test
+    public void testFilters()
+    {
+        String indexName = "filter_pushdown";
+
+        embeddedElasticsearchNode.getClient()
+                .admin()
+                .indices()
+                .prepareCreate(indexName)
+                .addMapping("doc",
+                        "boolean_column", "type=boolean",
+                        "byte_column", "type=byte",
+                        "short_column", "type=short",
+                        "integer_column", "type=integer",
+                        "long_column", "type=long",
+                        "float_column", "type=float",
+                        "double_column", "type=double",
+                        "keyword_column", "type=keyword",
+                        "text_column", "type=text",
+                        "binary_column", "type=binary",
+                        "timestamp_column", "type=date")
+                .get();
+
+        index(indexName, ImmutableMap.<String, Object>builder()
+                .put("boolean_column", true)
+                .put("byte_column", 1)
+                .put("short_column", 2)
+                .put("integer_column", 3)
+                .put("long_column", 4L)
+                .put("float_column", 1.0f)
+                .put("double_column", 1.0d)
+                .put("keyword_column", "cool")
+                .put("text_column", "some text")
+                .put("binary_column", new byte[] {(byte) 0xCA, (byte) 0xFE})
+                .put("timestamp_column", 1569888000000L)
+                .build());
+
+        embeddedElasticsearchNode.getClient()
+                .admin()
+                .indices()
+                .refresh(refreshRequest(indexName))
+                .actionGet();
+
+        // _score column
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE _score = 1.0", "VALUES 1");
+
+        // boolean
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE boolean_column = true", "VALUES 1");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE boolean_column = false", "VALUES 0");
+
+        // tinyint
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE byte_column = 1", "VALUES 1");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE byte_column = 0", "VALUES 0");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE byte_column > 1", "VALUES 0");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE byte_column < 1", "VALUES 0");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE byte_column > 0", "VALUES 1");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE byte_column < 10", "VALUES 1");
+
+        // smallint
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE short_column = 2", "VALUES 1");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE short_column > 2", "VALUES 0");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE short_column < 2", "VALUES 0");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE short_column = 0", "VALUES 0");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE short_column > 0", "VALUES 1");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE short_column < 10", "VALUES 1");
+
+        // integer
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE integer_column = 3", "VALUES 1");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE integer_column > 3", "VALUES 0");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE integer_column < 3", "VALUES 0");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE integer_column = 0", "VALUES 0");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE integer_column > 0", "VALUES 1");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE integer_column < 10", "VALUES 1");
+
+        // bigint
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE long_column = 4", "VALUES 1");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE long_column > 4", "VALUES 0");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE long_column < 4", "VALUES 0");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE long_column = 0", "VALUES 0");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE long_column > 0", "VALUES 1");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE long_column < 10", "VALUES 1");
+
+        // real
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE float_column = 1.0", "VALUES 1");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE float_column > 1.0", "VALUES 0");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE float_column < 1.0", "VALUES 0");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE float_column = 0.0", "VALUES 0");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE float_column > 0.0", "VALUES 1");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE float_column < 10.0", "VALUES 1");
+
+        // double
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE double_column = 1.0", "VALUES 1");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE double_column > 1.0", "VALUES 0");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE double_column < 1.0", "VALUES 0");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE double_column = 0.0", "VALUES 0");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE double_column > 0.0", "VALUES 1");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE double_column < 10.0", "VALUES 1");
+
+        // varchar
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE keyword_column = 'cool'", "VALUES 1");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE keyword_column = 'bar'", "VALUES 0");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE text_column = 'some text'", "VALUES 1");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE text_column = 'some'", "VALUES 0");
+
+        // binary
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE binary_column = x'CAFE'", "VALUES 1");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE binary_column = x'ABCD'", "VALUES 0");
+
+        // timestamp
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE timestamp_column = TIMESTAMP '2019-10-01 00:00:00'", "VALUES 1");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE timestamp_column > TIMESTAMP '2019-10-01 00:00:00'", "VALUES 0");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE timestamp_column < TIMESTAMP '2019-10-01 00:00:00'", "VALUES 0");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE timestamp_column = TIMESTAMP '2019-10-02 00:00:00'", "VALUES 0");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE timestamp_column > TIMESTAMP '2001-01-01 00:00:00'", "VALUES 1");
+        assertQuery("SELECT count(*) FROM filter_pushdown WHERE timestamp_column < TIMESTAMP '2030-01-01 00:00:00'", "VALUES 1");
+    }
+
+    @Test
     public void testDataTypesNested()
     {
         String indexName = "types_nested";
@@ -323,9 +446,100 @@ public class TestElasticsearchIntegrationSmokeTest
     }
 
     @Test
+    public void testMixedCase()
+    {
+        String indexName = "mixed_case";
+        index(indexName, ImmutableMap.<String, Object>builder()
+                .put("Name", "john")
+                .put("AGE", 32)
+                .build());
+
+        embeddedElasticsearchNode.getClient()
+                .admin()
+                .indices()
+                .refresh(refreshRequest(indexName))
+                .actionGet();
+
+        assertQuery(
+                "SELECT name, age FROM mixed_case",
+                "VALUES ('john', 32)");
+
+        assertQuery(
+                "SELECT name, age FROM mixed_case WHERE name = 'john'",
+                "VALUES ('john', 32)");
+    }
+
+    @Test
     public void testQueryStringError()
     {
         assertQueryFails("SELECT count(*) FROM \"orders: ++foo AND\"", "\\QFailed to parse query [ ++foo and]\\E");
+    }
+
+    @Test
+    public void testAlias()
+    {
+        embeddedElasticsearchNode.getClient()
+                .admin()
+                .indices()
+                .aliases(indexAliasesRequest()
+                        .addAliasAction(IndicesAliasesRequest.AliasActions.add()
+                                .index("orders")
+                                .alias("orders_alias")))
+                .actionGet();
+
+        embeddedElasticsearchNode.getClient()
+                .admin()
+                .indices()
+                .refresh(refreshRequest("orders_alias"))
+                .actionGet();
+
+        assertQuery(
+                "SELECT count(*) FROM orders_alias",
+                "SELECT count(*) FROM orders");
+    }
+
+    @Test
+    public void testMultiIndexAlias()
+    {
+        embeddedElasticsearchNode.getClient()
+                .admin()
+                .indices()
+                .aliases(indexAliasesRequest()
+                        .addAliasAction(IndicesAliasesRequest.AliasActions.add()
+                                .index("nation")
+                                .alias("multi_alias")))
+                .actionGet();
+
+        embeddedElasticsearchNode.getClient()
+                .admin()
+                .indices()
+                .aliases(indexAliasesRequest()
+                        .addAliasAction(IndicesAliasesRequest.AliasActions.add()
+                                .index("region")
+                                .alias("multi_alias")))
+                .actionGet();
+
+        embeddedElasticsearchNode.getClient()
+                .admin()
+                .indices()
+                .refresh(refreshRequest("multi_alias"))
+                .actionGet();
+
+        assertQuery(
+                "SELECT count(*) FROM multi_alias",
+                "SELECT (SELECT count(*) FROM region) + (SELECT count(*) FROM nation)");
+    }
+
+    @Override
+    protected boolean canCreateSchema()
+    {
+        return false;
+    }
+
+    @Override
+    protected boolean canDropSchema()
+    {
+        return false;
     }
 
     private void index(String indexName, Map<String, Object> document)

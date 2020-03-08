@@ -24,10 +24,12 @@ import io.prestosql.Session;
 import io.prestosql.connector.CatalogName;
 import io.prestosql.execution.warnings.WarningCollector;
 import io.prestosql.metadata.FunctionKind;
+import io.prestosql.metadata.FunctionMetadata;
 import io.prestosql.metadata.Metadata;
 import io.prestosql.metadata.NewTableLayout;
 import io.prestosql.metadata.OperatorNotFoundException;
 import io.prestosql.metadata.QualifiedObjectName;
+import io.prestosql.metadata.ResolvedFunction;
 import io.prestosql.metadata.TableHandle;
 import io.prestosql.metadata.TableMetadata;
 import io.prestosql.security.AccessControl;
@@ -45,12 +47,17 @@ import io.prestosql.spi.function.OperatorType;
 import io.prestosql.spi.security.AccessDeniedException;
 import io.prestosql.spi.security.Identity;
 import io.prestosql.spi.type.ArrayType;
+import io.prestosql.spi.type.CharType;
 import io.prestosql.spi.type.MapType;
 import io.prestosql.spi.type.RowType;
 import io.prestosql.spi.type.Type;
 import io.prestosql.spi.type.TypeNotFoundException;
+import io.prestosql.spi.type.VarcharType;
+import io.prestosql.sql.analyzer.Analysis.SelectExpression;
+import io.prestosql.sql.analyzer.Scope.AsteriskedIdentifierChainBasis;
 import io.prestosql.sql.parser.ParsingException;
 import io.prestosql.sql.parser.SqlParser;
+import io.prestosql.sql.planner.DeterminismEvaluator;
 import io.prestosql.sql.planner.ExpressionInterpreter;
 import io.prestosql.sql.planner.SymbolsExtractor;
 import io.prestosql.sql.planner.TypeProvider;
@@ -114,6 +121,7 @@ import io.prestosql.sql.tree.Relation;
 import io.prestosql.sql.tree.RenameColumn;
 import io.prestosql.sql.tree.RenameSchema;
 import io.prestosql.sql.tree.RenameTable;
+import io.prestosql.sql.tree.RenameView;
 import io.prestosql.sql.tree.ResetSession;
 import io.prestosql.sql.tree.Revoke;
 import io.prestosql.sql.tree.Rollback;
@@ -129,6 +137,7 @@ import io.prestosql.sql.tree.SingleColumn;
 import io.prestosql.sql.tree.SortItem;
 import io.prestosql.sql.tree.StartTransaction;
 import io.prestosql.sql.tree.Statement;
+import io.prestosql.sql.tree.SubscriptExpression;
 import io.prestosql.sql.tree.Table;
 import io.prestosql.sql.tree.TableSubquery;
 import io.prestosql.sql.tree.Unnest;
@@ -150,9 +159,12 @@ import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
+import static com.google.common.base.Verify.verify;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static com.google.common.collect.Iterables.getLast;
@@ -200,20 +212,25 @@ import static io.prestosql.sql.ParsingUtil.createParsingOptions;
 import static io.prestosql.sql.analyzer.AggregationAnalyzer.verifyOrderByAggregations;
 import static io.prestosql.sql.analyzer.AggregationAnalyzer.verifySourceAggregations;
 import static io.prestosql.sql.analyzer.ExpressionAnalyzer.createConstantAnalyzer;
+import static io.prestosql.sql.analyzer.ExpressionTreeUtils.asQualifiedName;
 import static io.prestosql.sql.analyzer.ExpressionTreeUtils.extractAggregateFunctions;
 import static io.prestosql.sql.analyzer.ExpressionTreeUtils.extractExpressions;
 import static io.prestosql.sql.analyzer.ExpressionTreeUtils.extractWindowFunctions;
+import static io.prestosql.sql.analyzer.Scope.BasisType.TABLE;
+import static io.prestosql.sql.analyzer.ScopeReferenceExtractor.getReferencesToScope;
 import static io.prestosql.sql.analyzer.ScopeReferenceExtractor.hasReferencesToScope;
 import static io.prestosql.sql.analyzer.SemanticExceptions.semanticException;
 import static io.prestosql.sql.analyzer.TypeSignatureProvider.fromTypes;
-import static io.prestosql.sql.planner.DeterminismEvaluator.isDeterministic;
 import static io.prestosql.sql.planner.ExpressionInterpreter.expressionOptimizer;
+import static io.prestosql.sql.tree.BooleanLiteral.TRUE_LITERAL;
 import static io.prestosql.sql.tree.ExplainType.Type.DISTRIBUTED;
 import static io.prestosql.sql.tree.FrameBound.Type.CURRENT_ROW;
 import static io.prestosql.sql.tree.FrameBound.Type.FOLLOWING;
 import static io.prestosql.sql.tree.FrameBound.Type.PRECEDING;
 import static io.prestosql.sql.tree.FrameBound.Type.UNBOUNDED_FOLLOWING;
 import static io.prestosql.sql.tree.FrameBound.Type.UNBOUNDED_PRECEDING;
+import static io.prestosql.sql.tree.Join.Type.FULL;
+import static io.prestosql.sql.tree.Join.Type.RIGHT;
 import static io.prestosql.sql.tree.WindowFrame.Type.RANGE;
 import static io.prestosql.type.UnknownType.UNKNOWN;
 import static io.prestosql.util.MoreLists.mappedCopy;
@@ -310,7 +327,7 @@ class StatementAnalyzer
             }
 
             // analyze the query that creates the data
-            Scope queryScope = process(insert.getQuery(), scope);
+            Scope queryScope = analyze(insert.getQuery(), createScope(scope));
 
             analysis.setUpdateType("INSERT");
 
@@ -385,13 +402,52 @@ class StatementAnalyzer
                 return false;
             }
 
+            /*
+            TODO enable coercions based on type compatibility for INSERT of structural types containing nested bounded character types.
+            It might require defining a new range of cast operators and changes in FunctionRegistry to ensure proper handling
+            of nested types.
+            Currently, INSERT for such structural types is only allowed in the case of strict type coercibility.
+            INSERT for other types is allowed in all cases described by the Standard. It is obtained
+            by emulating a "guarded cast" in LogicalPlanner, and without any changes to the actual operators.
+            */
             for (int i = 0; i < tableTypes.size(); i++) {
-                if (!typeCoercion.canCoerce(queryTypes.get(i), tableTypes.get(i))) {
+                if (hasNestedBoundedCharacterType(tableTypes.get(i))) {
+                    if (!typeCoercion.canCoerce(queryTypes.get(i), tableTypes.get(i))) {
+                        return false;
+                    }
+                }
+                else if (!typeCoercion.isCompatible(queryTypes.get(i), tableTypes.get(i))) {
                     return false;
                 }
             }
 
             return true;
+        }
+
+        private boolean hasNestedBoundedCharacterType(Type type)
+        {
+            if (type instanceof ArrayType) {
+                return hasBoundedCharacterType(((ArrayType) type).getElementType());
+            }
+
+            if (type instanceof MapType) {
+                return hasBoundedCharacterType(((MapType) type).getKeyType()) || hasBoundedCharacterType(((MapType) type).getValueType());
+            }
+
+            if (type instanceof RowType) {
+                for (Type fieldType : type.getTypeParameters()) {
+                    if (hasBoundedCharacterType(fieldType)) {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private boolean hasBoundedCharacterType(Type type)
+        {
+            return type instanceof CharType || (type instanceof VarcharType && !((VarcharType) type).isUnbounded()) || hasNestedBoundedCharacterType(type);
         }
 
         @Override
@@ -493,7 +549,7 @@ class StatementAnalyzer
             accessControl.checkCanCreateTable(session.toSecurityContext(), targetTable);
 
             // analyze the query that creates the table
-            Scope queryScope = process(node.getQuery(), scope);
+            Scope queryScope = analyze(node.getQuery(), createScope(scope));
 
             ImmutableList.Builder<ColumnMetadata> columns = ImmutableList.builder();
 
@@ -657,6 +713,12 @@ class StatementAnalyzer
         }
 
         @Override
+        protected Scope visitRenameView(RenameView node, Optional<Scope> scope)
+        {
+            return createAndAssignScope(node, scope);
+        }
+
+        @Override
         protected Scope visitDropView(DropView node, Optional<Scope> scope)
         {
             return createAndAssignScope(node, scope);
@@ -750,20 +812,25 @@ class StatementAnalyzer
 
         private void validateColumnAliases(List<Identifier> columnAliases, int sourceColumnSize)
         {
-            if (columnAliases.size() != sourceColumnSize) {
-                throw semanticException(
-                        MISMATCHED_COLUMN_ALIASES,
-                        columnAliases.get(0),
-                        "Column alias list has %s entries but subquery has %s columns",
-                        columnAliases.size(),
-                        sourceColumnSize);
-            }
+            validateColumnAliasesCount(columnAliases, sourceColumnSize);
             Set<String> names = new HashSet<>();
             for (Identifier identifier : columnAliases) {
                 if (names.contains(identifier.getValue().toLowerCase(ENGLISH))) {
                     throw semanticException(DUPLICATE_COLUMN_NAME, identifier, "Column name '%s' specified more than once", identifier.getValue());
                 }
                 names.add(identifier.getValue().toLowerCase(ENGLISH));
+            }
+        }
+
+        private void validateColumnAliasesCount(List<Identifier> columnAliases, int sourceColumnSize)
+        {
+            if (columnAliases.size() != sourceColumnSize) {
+                throw semanticException(
+                        MISMATCHED_COLUMN_ALIASES,
+                        columnAliases.get(0),
+                        "Column alias list has %s entries but relation has %s columns",
+                        columnAliases.size(),
+                        sourceColumnSize);
             }
         }
 
@@ -809,7 +876,11 @@ class StatementAnalyzer
             }
 
             // Input fields == Output fields
-            analysis.setOutputExpressions(node, descriptorToFields(queryBodyScope));
+            analysis.setSelectExpressions(
+                    node,
+                    descriptorToFields(queryBodyScope).stream()
+                            .map(expression -> new SelectExpression(expression, Optional.empty()))
+                            .collect(toImmutableList()));
 
             Scope queryScope = Scope.builder()
                     .withParent(withScope)
@@ -1100,14 +1171,14 @@ class StatementAnalyzer
             List<Expression> orderByExpressions = emptyList();
             Optional<Scope> orderByScope = Optional.empty();
             if (node.getOrderBy().isPresent()) {
-                if (node.getSelect().isDistinct()) {
-                    verifySelectDistinct(node, outputExpressions);
-                }
-
                 OrderBy orderBy = node.getOrderBy().get();
                 orderByScope = Optional.of(computeAndAssignOrderByScope(orderBy, sourceScope, outputScope));
 
                 orderByExpressions = analyzeOrderBy(node, orderBy.getSortItems(), orderByScope.get());
+
+                if (node.getSelect().isDistinct()) {
+                    verifySelectDistinct(node, outputExpressions);
+                }
 
                 if (sourceScope.getOuterQueryParent().isPresent() && !node.getLimit().isPresent() && !node.getOffset().isPresent()) {
                     // not the root scope and ORDER BY is ineffective
@@ -1256,6 +1327,34 @@ class StatementAnalyzer
             Scope left = process(node.getLeft(), scope);
             Scope right = process(node.getRight(), isLateralRelation(node.getRight()) ? Optional.of(left) : scope);
 
+            if (isLateralRelation(node.getRight())) {
+                if (node.getType().equals(RIGHT) || node.getType().equals(FULL)) {
+                    Stream<Expression> leftScopeReferences = getReferencesToScope(node.getRight(), analysis, left);
+                    leftScopeReferences.findFirst().ifPresent(reference -> {
+                        throw semanticException(INVALID_COLUMN_REFERENCE, reference, "LATERAL reference not allowed in %s JOIN", node.getType().name());
+                    });
+                }
+                if (isUnnestRelation(node.getRight())) {
+                    if (criteria != null) {
+                        if (!(criteria instanceof JoinOn) || !((JoinOn) criteria).getExpression().equals(TRUE_LITERAL)) {
+                            throw semanticException(
+                                    NOT_SUPPORTED,
+                                    criteria instanceof JoinOn ? ((JoinOn) criteria).getExpression() : node,
+                                    "%s JOIN involving UNNEST is only supported with condition ON TRUE",
+                                    node.getType().name());
+                        }
+                    }
+                }
+                else if (node.getType() == FULL) {
+                    if (!(criteria instanceof JoinOn) || !((JoinOn) criteria).getExpression().equals(TRUE_LITERAL)) {
+                        throw semanticException(
+                                NOT_SUPPORTED,
+                                criteria instanceof JoinOn ? ((JoinOn) criteria).getExpression() : node,
+                                "FULL JOIN involving LATERAL relation is only supported with condition ON TRUE");
+                    }
+                }
+            }
+
             if (criteria instanceof JoinUsing) {
                 return analyzeJoinUsing(node, ((JoinUsing) criteria).getColumns(), scope, left, right);
             }
@@ -1364,6 +1463,14 @@ class StatementAnalyzer
             return node instanceof Unnest || node instanceof Lateral;
         }
 
+        private boolean isUnnestRelation(Relation node)
+        {
+            if (node instanceof AliasedRelation) {
+                return isUnnestRelation(((AliasedRelation) node).getRelation());
+            }
+            return node instanceof Unnest;
+        }
+
         @Override
         protected Scope visitValues(Values node, Optional<Scope> scope)
         {
@@ -1447,7 +1554,7 @@ class StatementAnalyzer
         private List<FunctionCall> analyzeWindowFunctions(QuerySpecification node, List<Expression> expressions)
         {
             for (Expression expression : expressions) {
-                new WindowFunctionValidator().process(expression, analysis);
+                new WindowFunctionValidator(metadata).process(expression, analysis);
             }
 
             List<FunctionCall> windowFunctions = extractWindowFunctions(expressions);
@@ -1503,7 +1610,8 @@ class StatementAnalyzer
 
                 List<Type> argumentTypes = mappedCopy(windowFunction.getArguments(), analysis::getType);
 
-                FunctionKind kind = metadata.resolveFunction(windowFunction.getName(), fromTypes(argumentTypes)).getSignature().getKind();
+                ResolvedFunction resolvedFunction = metadata.resolveFunction(windowFunction.getName(), fromTypes(argumentTypes));
+                FunctionKind kind = metadata.getFunctionMetadata(resolvedFunction).getKind();
                 if (kind != AGGREGATE && kind != WINDOW) {
                     throw semanticException(FUNCTION_NOT_WINDOW, node, "Not a window function: %s", windowFunction.getName());
                 }
@@ -1770,21 +1878,9 @@ class StatementAnalyzer
 
             for (SelectItem item : node.getSelect().getSelectItems()) {
                 if (item instanceof AllColumns) {
-                    // expand * and T.*
-                    Optional<QualifiedName> starPrefix = ((AllColumns) item).getTarget()
-                            .map(target -> {
-                                if (target instanceof DereferenceExpression) {
-                                    return DereferenceExpression.getQualifiedName((DereferenceExpression) target);
-                                }
-                                if (target instanceof Identifier) {
-                                    return QualifiedName.of(ImmutableList.of((Identifier) target));
-                                }
-                                throw semanticException(NOT_SUPPORTED, item, "Only identifier chains supported with .*");
-                            });
-
-                    for (Field field : sourceScope.getRelationType().resolveFieldsWithPrefix(starPrefix)) {
-                        outputFields.add(Field.newUnqualified(field.getName(), field.getType(), field.getOriginTable(), field.getOriginColumnName(), false));
-                    }
+                    List<Field> itemOutputFields = analysis.getSelectAllResultFields((AllColumns) item);
+                    checkNotNull(itemOutputFields, "output fields is null for select item %s", item);
+                    outputFields.addAll(itemOutputFields);
                 }
                 else if (item instanceof SingleColumn) {
                     SingleColumn column = (SingleColumn) item;
@@ -1885,89 +1981,201 @@ class StatementAnalyzer
         private List<Expression> analyzeSelect(QuerySpecification node, Scope scope)
         {
             ImmutableList.Builder<Expression> outputExpressionBuilder = ImmutableList.builder();
+            ImmutableList.Builder<SelectExpression> selectExpressionBuilder = ImmutableList.builder();
 
             for (SelectItem item : node.getSelect().getSelectItems()) {
                 if (item instanceof AllColumns) {
-                    analyzeSelectAllColumns((AllColumns) item, node, scope, outputExpressionBuilder);
+                    analyzeSelectAllColumns((AllColumns) item, node, scope, outputExpressionBuilder, selectExpressionBuilder);
                 }
                 else if (item instanceof SingleColumn) {
-                    analyzeSelectSingleColumn((SingleColumn) item, node, scope, outputExpressionBuilder);
+                    analyzeSelectSingleColumn((SingleColumn) item, node, scope, outputExpressionBuilder, selectExpressionBuilder);
                 }
                 else {
                     throw new IllegalArgumentException("Unsupported SelectItem type: " + item.getClass().getName());
                 }
             }
+            analysis.setSelectExpressions(node, selectExpressionBuilder.build());
 
-            List<Expression> result = outputExpressionBuilder.build();
-            analysis.setOutputExpressions(node, result);
-
-            return result;
+            return outputExpressionBuilder.build();
         }
 
         private void analyzeSelectAllColumns(
                 AllColumns allColumns,
                 QuerySpecification node,
                 Scope scope,
-                ImmutableList.Builder<Expression> outputExpressionBuilder)
+                ImmutableList.Builder<Expression> outputExpressionBuilder,
+                ImmutableList.Builder<SelectExpression> selectExpressionBuilder)
         {
-            // expand * and T.*
-            Optional<QualifiedName> starPrefix = allColumns.getTarget()
-                    .map(target -> {
-                        if (target instanceof DereferenceExpression) {
-                            return DereferenceExpression.getQualifiedName((DereferenceExpression) target);
-                        }
-                        if (target instanceof Identifier) {
-                            return QualifiedName.of(ImmutableList.of((Identifier) target));
-                        }
-                        throw semanticException(NOT_SUPPORTED, allColumns, "Only identifier chains supported with .*");
-                    });
+            // expand * and expression.*
+            if (allColumns.getTarget().isPresent()) {
+                // analyze AllColumns with target expression (expression.*)
+                Expression expression = allColumns.getTarget().get();
 
+                QualifiedName prefix = asQualifiedName(expression);
+                if (prefix != null) {
+                    // analyze prefix as an 'asterisked identifier chain'
+                    Optional<AsteriskedIdentifierChainBasis> identifierChainBasis = scope.resolveAsteriskedIdentifierChainBasis(prefix, allColumns);
+                    if (!identifierChainBasis.isPresent()) {
+                        throw semanticException(TABLE_NOT_FOUND, allColumns, "Unable to resolve reference " + prefix);
+                    }
+                    if (identifierChainBasis.get().getBasisType() == TABLE) {
+                        RelationType relationType = identifierChainBasis.get().getRelationType().get();
+                        List<Field> fields = relationType.resolveVisibleFieldsWithRelationPrefix(Optional.of(prefix));
+                        if (fields.isEmpty()) {
+                            throw semanticException(COLUMN_NOT_FOUND, allColumns, "SELECT * not allowed from relation that has no columns");
+                        }
+                        boolean local = scope.isLocalScope(identifierChainBasis.get().getScope().get());
+                        analyzeAllColumnsFromTable(
+                                fields,
+                                allColumns,
+                                node,
+                                local ? scope : identifierChainBasis.get().getScope().get(),
+                                outputExpressionBuilder,
+                                selectExpressionBuilder,
+                                relationType,
+                                local);
+                        return;
+                    }
+                }
+                // identifierChainBasis.get().getBasisType == FIELD or target expression isn't a QualifiedName
+                analyzeAllFieldsFromRowTypeExpression(expression, allColumns, node, scope, outputExpressionBuilder, selectExpressionBuilder);
+            }
+            else {
+                // analyze AllColumns without target expression ('*')
+                if (!allColumns.getAliases().isEmpty()) {
+                    throw semanticException(NOT_SUPPORTED, allColumns, "Column aliases not supported");
+                }
+
+                List<Field> fields = (List<Field>) scope.getRelationType().getVisibleFields();
+                if (fields.isEmpty()) {
+                    if (!node.getFrom().isPresent()) {
+                        throw semanticException(COLUMN_NOT_FOUND, allColumns, "SELECT * not allowed in queries without FROM clause");
+                    }
+                    throw semanticException(COLUMN_NOT_FOUND, allColumns, "SELECT * not allowed from relation that has no columns");
+                }
+
+                analyzeAllColumnsFromTable(fields, allColumns, node, scope, outputExpressionBuilder, selectExpressionBuilder, scope.getRelationType(), true);
+            }
+        }
+
+        private void analyzeAllColumnsFromTable(
+                List<Field> fields,
+                AllColumns allColumns,
+                QuerySpecification node,
+                Scope scope,
+                ImmutableList.Builder<Expression> outputExpressionBuilder,
+                ImmutableList.Builder<SelectExpression> selectExpressionBuilder,
+                RelationType relationType,
+                boolean local)
+        {
             if (!allColumns.getAliases().isEmpty()) {
-                throw semanticException(NOT_SUPPORTED, allColumns, "Column aliases not supported");
+                validateColumnAliasesCount(allColumns.getAliases(), fields.size());
             }
 
-            RelationType relationType = scope.getRelationType();
-            List<Field> fields = relationType.resolveFieldsWithPrefix(starPrefix);
-            if (fields.isEmpty()) {
-                if (starPrefix.isPresent()) {
-                    throw semanticException(TABLE_NOT_FOUND, allColumns, "Table '%s' not found", starPrefix.get());
-                }
-                if (!node.getFrom().isPresent()) {
-                    throw semanticException(COLUMN_NOT_FOUND, allColumns, "SELECT * not allowed in queries without FROM clause");
-                }
-                throw semanticException(COLUMN_NOT_FOUND, allColumns, "SELECT * not allowed from relation that has no columns");
-            }
+            ImmutableList.Builder<Field> itemOutputFieldBuilder = ImmutableList.builder();
 
-            for (Field field : fields) {
-                int fieldIndex = relationType.indexOf(field);
-                FieldReference expression = new FieldReference(fieldIndex);
-                outputExpressionBuilder.add(expression);
-                ExpressionAnalysis expressionAnalysis = analyzeExpression(expression, scope);
+            for (int i = 0; i < fields.size(); i++) {
+                Field field = fields.get(i);
+                Expression fieldExpression;
+                if (local) {
+                    fieldExpression = new FieldReference(relationType.indexOf(field));
+                }
+                else {
+                    if (!field.getName().isPresent()) {
+                        throw semanticException(NOT_SUPPORTED, node.getSelect(), "SELECT * from outer scope table not supported with anonymous columns");
+                    }
+                    checkState(field.getRelationAlias().isPresent(), "missing relation alias");
+                    fieldExpression = new DereferenceExpression(DereferenceExpression.from(field.getRelationAlias().get()), new Identifier(field.getName().get()));
+                }
+                analyzeExpression(fieldExpression, scope);
+                outputExpressionBuilder.add(fieldExpression);
+                selectExpressionBuilder.add(new SelectExpression(fieldExpression, Optional.empty()));
 
-                Type type = expressionAnalysis.getType(expression);
+                Optional<String> alias = field.getName();
+                if (!allColumns.getAliases().isEmpty()) {
+                    alias = Optional.of((allColumns.getAliases().get(i)).getValue());
+                }
+
+                itemOutputFieldBuilder.add(new Field(
+                        field.getRelationAlias(),
+                        alias,
+                        field.getType(),
+                        false,
+                        field.getOriginTable(),
+                        field.getOriginColumnName(),
+                        !allColumns.getAliases().isEmpty() || field.isAliased()));
+
+                Type type = field.getType();
                 if (node.getSelect().isDistinct() && !type.isComparable()) {
                     throw semanticException(TYPE_MISMATCH, node.getSelect(), "DISTINCT can only be applied to comparable types (actual: %s)", type);
                 }
             }
+            analysis.setSelectAllResultFields(allColumns, itemOutputFieldBuilder.build());
+        }
+
+        private void analyzeAllFieldsFromRowTypeExpression(
+                Expression expression,
+                AllColumns allColumns,
+                QuerySpecification node,
+                Scope scope,
+                ImmutableList.Builder<Expression> outputExpressionBuilder,
+                ImmutableList.Builder<SelectExpression> selectExpressionBuilder)
+        {
+            ImmutableList.Builder<Field> itemOutputFieldBuilder = ImmutableList.builder();
+
+            ExpressionAnalysis expressionAnalysis = analyzeExpression(expression, scope);
+            Type type = expressionAnalysis.getType(expression);
+            if (!(type instanceof RowType)) {
+                throw semanticException(TYPE_MISMATCH, node.getSelect(), "expected expression of type Row");
+            }
+            int referencedFieldsCount = ((RowType) type).getFields().size();
+            if (!allColumns.getAliases().isEmpty()) {
+                validateColumnAliasesCount(allColumns.getAliases(), referencedFieldsCount);
+            }
+            analysis.recordSubqueries(node, expressionAnalysis);
+
+            ImmutableList.Builder<Expression> unfoldedExpressionsBuilder = ImmutableList.builder();
+            for (int i = 0; i < referencedFieldsCount; i++) {
+                Expression outputExpression = new SubscriptExpression(expression, new LongLiteral("" + (i + 1)));
+                outputExpressionBuilder.add(outputExpression);
+                analyzeExpression(outputExpression, scope);
+                unfoldedExpressionsBuilder.add(outputExpression);
+
+                Type outputExpressionType = type.getTypeParameters().get(i);
+                if (node.getSelect().isDistinct() && !(outputExpressionType.isComparable())) {
+                    throw semanticException(TYPE_MISMATCH, node.getSelect(), "DISTINCT can only be applied to comparable types (actual: %s)", type.getTypeParameters().get(i));
+                }
+
+                Optional<String> name = ((RowType) type).getFields().get(i).getName();
+                if (!allColumns.getAliases().isEmpty()) {
+                    name = Optional.of((allColumns.getAliases().get(i)).getValue());
+                }
+                itemOutputFieldBuilder.add(Field.newUnqualified(name, outputExpressionType));
+            }
+            selectExpressionBuilder.add(new SelectExpression(expression, Optional.of(unfoldedExpressionsBuilder.build())));
+            analysis.setSelectAllResultFields(allColumns, itemOutputFieldBuilder.build());
         }
 
         private void analyzeSelectSingleColumn(
                 SingleColumn singleColumn,
                 QuerySpecification node,
                 Scope scope,
-                ImmutableList.Builder<Expression> outputExpressionBuilder)
+                ImmutableList.Builder<Expression> outputExpressionBuilder,
+                ImmutableList.Builder<SelectExpression> selectExpressionBuilder)
         {
-            ExpressionAnalysis expressionAnalysis = analyzeExpression(singleColumn.getExpression(), scope);
+            Expression expression = singleColumn.getExpression();
+            ExpressionAnalysis expressionAnalysis = analyzeExpression(expression, scope);
             analysis.recordSubqueries(node, expressionAnalysis);
-            outputExpressionBuilder.add(singleColumn.getExpression());
+            outputExpressionBuilder.add(expression);
+            selectExpressionBuilder.add(new SelectExpression(expression, Optional.empty()));
 
-            Type type = expressionAnalysis.getType(singleColumn.getExpression());
+            Type type = expressionAnalysis.getType(expression);
             if (node.getSelect().isDistinct() && !type.isComparable()) {
                 throw semanticException(
                         TYPE_MISMATCH, node.getSelect(),
                         "DISTINCT can only be applied to comparable types (actual: %s): %s",
                         type,
-                        singleColumn.getExpression());
+                        expression);
             }
         }
 
@@ -2203,10 +2411,17 @@ class StatementAnalyzer
                     throw semanticException(EXPRESSION_NOT_IN_DISTINCT, node.getSelect(), "For SELECT DISTINCT, ORDER BY expressions must appear in select list");
                 }
 
-                if (!isDeterministic(expression)) {
+                if (!DeterminismEvaluator.isDeterministic(expression, this::getFunctionMetadata)) {
                     throw semanticException(EXPRESSION_NOT_IN_DISTINCT, expression, "Non deterministic ORDER BY expression is not supported with SELECT DISTINCT");
                 }
             }
+        }
+
+        private FunctionMetadata getFunctionMetadata(FunctionCall functionCall)
+        {
+            ResolvedFunction resolvedFunction = analysis.getResolvedFunction(functionCall);
+            verify(resolvedFunction != null, "function has not been analyzed yet: %s", functionCall);
+            return metadata.getFunctionMetadata(resolvedFunction);
         }
 
         private List<Expression> analyzeOrderBy(Node node, List<SortItem> sortItems, Scope orderByScope)

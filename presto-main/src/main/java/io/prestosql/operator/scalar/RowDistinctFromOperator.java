@@ -54,7 +54,8 @@ public class RowDistinctFromOperator
                 ImmutableList.of(comparableWithVariadicBound("T", "row")),
                 ImmutableList.of(),
                 BOOLEAN.getTypeSignature(),
-                ImmutableList.of(new TypeSignature("T"), new TypeSignature("T")));
+                ImmutableList.of(new TypeSignature("T"), new TypeSignature("T")),
+                false);
     }
 
     @Override
@@ -83,8 +84,7 @@ public class RowDistinctFromOperator
                                 false,
                                 ImmutableList.of(valueTypeArgumentProperty(BLOCK_AND_POSITION), valueTypeArgumentProperty(BLOCK_AND_POSITION)),
                                 METHOD_HANDLE_BLOCK_POSITION.bindTo(type).bindTo(argumentMethods.build()),
-                                Optional.empty())),
-                isDeterministic());
+                                Optional.empty())));
     }
 
     public static boolean isDistinctFrom(Type rowType, List<MethodHandle> argumentMethods, Block leftRow, boolean leftNull, Block rightRow, boolean rightNull)

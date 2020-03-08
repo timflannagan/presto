@@ -81,8 +81,8 @@ import static io.prestosql.spi.type.VarbinaryType.VARBINARY;
 import static io.prestosql.spi.type.VarcharType.VARCHAR;
 import static io.prestosql.spi.type.VarcharType.createUnboundedVarcharType;
 import static io.prestosql.testing.DateTimeTestingUtils.sqlTimestampOf;
+import static io.prestosql.testing.StructuralTestUtil.mapType;
 import static io.prestosql.testing.TestingConnectorSession.SESSION;
-import static io.prestosql.tests.StructuralTestUtil.mapType;
 import static java.lang.Math.toIntExact;
 import static java.lang.String.format;
 import static java.lang.String.join;
@@ -849,6 +849,7 @@ public abstract class AbstractTestParquetReader
                 expectedValues.add(SqlDecimal.of(value, precision, scale));
             }
             tester.testRoundTrip(javaIntObjectInspector, intValues, expectedValues.build(), createDecimalType(precision, scale), Optional.of(parquetSchema));
+            tester.testRoundTrip(javaIntObjectInspector, intValues, expectedValues.build(), createDecimalType(MAX_PRECISION, scale), Optional.of(parquetSchema));
         }
     }
 
@@ -856,7 +857,7 @@ public abstract class AbstractTestParquetReader
     public void testDecimalBackedByINT64()
             throws Exception
     {
-        for (int precision = MAX_PRECISION_INT32 + 1; precision <= MAX_PRECISION_INT64; precision++) {
+        for (int precision = 1; precision <= MAX_PRECISION_INT64; precision++) {
             int scale = ThreadLocalRandom.current().nextInt(precision);
             MessageType parquetSchema = parseMessageType(format("message hive_decimal { optional INT64 test (DECIMAL(%d, %d)); }", precision, scale));
             ContiguousSet<Long> longValues = longsBetween(1, 1_000);
@@ -865,6 +866,7 @@ public abstract class AbstractTestParquetReader
                 expectedValues.add(SqlDecimal.of(value, precision, scale));
             }
             tester.testRoundTrip(javaLongObjectInspector, longValues, expectedValues.build(), createDecimalType(precision, scale), Optional.of(parquetSchema));
+            tester.testRoundTrip(javaLongObjectInspector, longValues, expectedValues.build(), createDecimalType(MAX_PRECISION, scale), Optional.of(parquetSchema));
         }
     }
 
@@ -872,7 +874,7 @@ public abstract class AbstractTestParquetReader
     public void testDecimalBackedByFixedLenByteArray()
             throws Exception
     {
-        for (int precision = MAX_PRECISION_INT64 + 1; precision < MAX_PRECISION; precision++) {
+        for (int precision = 1; precision < MAX_PRECISION; precision++) {
             int scale = ThreadLocalRandom.current().nextInt(precision);
             ContiguousSet<BigInteger> values = bigIntegersBetween(BigDecimal.valueOf(Math.pow(10, precision - 1)).toBigInteger(), BigDecimal.valueOf(Math.pow(10, precision)).toBigInteger());
             ImmutableList.Builder<SqlDecimal> expectedValues = new ImmutableList.Builder<>();
@@ -885,6 +887,10 @@ public abstract class AbstractTestParquetReader
                     writeValues.build(),
                     expectedValues.build(),
                     createDecimalType(precision, scale));
+            tester.testRoundTrip(new JavaHiveDecimalObjectInspector(new DecimalTypeInfo(precision, scale)),
+                    writeValues.build(),
+                    expectedValues.build(),
+                    createDecimalType(MAX_PRECISION, scale));
         }
     }
 

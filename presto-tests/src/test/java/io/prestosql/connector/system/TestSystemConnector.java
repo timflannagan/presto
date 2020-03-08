@@ -23,9 +23,9 @@ import io.prestosql.spi.Plugin;
 import io.prestosql.spi.connector.ColumnMetadata;
 import io.prestosql.spi.connector.ConnectorFactory;
 import io.prestosql.spi.connector.SchemaTableName;
+import io.prestosql.testing.AbstractTestQueryFramework;
+import io.prestosql.testing.DistributedQueryRunner;
 import io.prestosql.testing.QueryRunner;
-import io.prestosql.tests.AbstractTestQueryFramework;
-import io.prestosql.tests.DistributedQueryRunner;
 import org.testng.annotations.AfterClass;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
@@ -61,12 +61,8 @@ public class TestSystemConnector
 
     private final ExecutorService executor = Executors.newSingleThreadScheduledExecutor(threadsNamed(TestSystemConnector.class.getSimpleName()));
 
-    protected TestSystemConnector()
-    {
-        super(TestSystemConnector::createQueryRunner);
-    }
-
-    public static QueryRunner createQueryRunner()
+    @Override
+    protected QueryRunner createQueryRunner()
             throws Exception
     {
         Session defaultSession = testSessionBuilder()

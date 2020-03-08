@@ -23,15 +23,16 @@ import io.prestosql.Session;
 import io.prestosql.connector.CatalogName;
 import io.prestosql.execution.warnings.WarningCollector;
 import io.prestosql.metadata.FunctionKind;
+import io.prestosql.metadata.FunctionMetadata;
 import io.prestosql.metadata.Metadata;
 import io.prestosql.metadata.QualifiedObjectName;
 import io.prestosql.metadata.SessionPropertyManager.SessionPropertyValue;
-import io.prestosql.metadata.SqlFunction;
 import io.prestosql.metadata.TableHandle;
 import io.prestosql.security.AccessControl;
 import io.prestosql.spi.PrestoException;
 import io.prestosql.spi.StandardErrorCode;
 import io.prestosql.spi.connector.CatalogSchemaName;
+import io.prestosql.spi.connector.CatalogSchemaTableName;
 import io.prestosql.spi.connector.ConnectorTableMetadata;
 import io.prestosql.spi.connector.ConnectorViewDefinition;
 import io.prestosql.spi.connector.SchemaTableName;
@@ -123,8 +124,10 @@ import static io.prestosql.sql.QueryUtil.singleValueQuery;
 import static io.prestosql.sql.QueryUtil.table;
 import static io.prestosql.sql.SqlFormatter.formatSql;
 import static io.prestosql.sql.analyzer.SemanticExceptions.semanticException;
+import static io.prestosql.sql.analyzer.TypeSignatureTranslator.toSqlType;
 import static io.prestosql.sql.tree.BooleanLiteral.FALSE_LITERAL;
 import static io.prestosql.sql.tree.BooleanLiteral.TRUE_LITERAL;
+import static io.prestosql.sql.tree.LogicalBinaryExpression.and;
 import static io.prestosql.sql.tree.ShowCreate.Type.TABLE;
 import static io.prestosql.sql.tree.ShowCreate.Type.VIEW;
 import static java.lang.String.format;
@@ -233,6 +236,7 @@ final class ShowQueriesRewrite
                         new CatalogSchemaName(catalogName, qualifiedTableName.getSchemaName()));
 
                 predicate = Optional.of(combineConjuncts(
+                        metadata,
                         equal(identifier("table_schema"), new StringLiteral(qualifiedTableName.getSchemaName())),
                         equal(identifier("table_name"), new StringLiteral(qualifiedTableName.getObjectName()))));
             }
@@ -344,7 +348,10 @@ final class ShowQueriesRewrite
             Optional<Expression> predicate = Optional.empty();
             Optional<String> likePattern = node.getLikePattern();
             if (likePattern.isPresent()) {
-                predicate = Optional.of(new LikePredicate(identifier("Catalog"), new StringLiteral(likePattern.get()), Optional.empty()));
+                predicate = Optional.of(new LikePredicate(
+                        identifier("Catalog"),
+                        new StringLiteral(likePattern.get()),
+                        node.getEscape().map(StringLiteral::new)));
             }
 
             return simpleQuery(
@@ -433,6 +440,9 @@ final class ShowQueriesRewrite
                 Identifier tableName = parts.get(0);
                 Identifier schemaName = (parts.size() > 1) ? parts.get(1) : new Identifier(objectName.getSchemaName());
                 Identifier catalogName = (parts.size() > 2) ? parts.get(2) : new Identifier(objectName.getCatalogName());
+
+                accessControl.checkCanShowColumnsMetadata(session.toSecurityContext(), new CatalogSchemaTableName(catalogName.getValue(), new SchemaTableName(schemaName.getValue(), tableName.getValue())));
+
                 String sql = formatSql(new CreateView(QualifiedName.of(ImmutableList.of(catalogName, schemaName, tableName)), query, false, Optional.empty())).trim();
                 return singleValueQuery("Create View", sql);
             }
@@ -447,6 +457,7 @@ final class ShowQueriesRewrite
                     throw semanticException(TABLE_NOT_FOUND, node, "Table '%s' does not exist", objectName);
                 }
 
+                accessControl.checkCanShowColumnsMetadata(session.toSecurityContext(), new CatalogSchemaTableName(tableHandle.get().getCatalogName().getCatalogName(), objectName.asSchemaTableName()));
                 ConnectorTableMetadata connectorTableMetadata = metadata.getTableMetadata(session, tableHandle.get()).getMetadata();
 
                 Map<String, PropertyMetadata<?>> allColumnProperties = metadata.getColumnPropertyManager().getAllProperties().get(tableHandle.get().getCatalogName());
@@ -455,7 +466,7 @@ final class ShowQueriesRewrite
                         .filter(column -> !column.isHidden())
                         .map(column -> {
                             List<Property> propertyNodes = buildProperties(objectName, Optional.of(column.getName()), INVALID_COLUMN_PROPERTY, column.getProperties(), allColumnProperties);
-                            return new ColumnDefinition(new Identifier(column.getName()), column.getType().getDisplayName(), column.isNullable(), propertyNodes, Optional.ofNullable(column.getComment()));
+                            return new ColumnDefinition(new Identifier(column.getName()), toSqlType(column.getType()), column.isNullable(), propertyNodes, Optional.ofNullable(column.getComment()));
                         })
                         .collect(toImmutableList());
 
@@ -548,6 +559,13 @@ final class ShowQueriesRewrite
                             .map(entry -> aliasedName(entry.getKey(), entry.getValue()))
                             .collect(toImmutableList())),
                     aliased(new Values(rows), "functions", ImmutableList.copyOf(columns.keySet())),
+                    node.getLikePattern().map(like ->
+                            new LikePredicate(
+                                    identifier("function_name"),
+                                    new StringLiteral(like),
+                                    node.getEscape().map(StringLiteral::new)))
+                            .map(Expression.class::cast)
+                            .orElse(TRUE_LITERAL),
                     ordering(
                             new SortItem(
                                     functionCall("lower", identifier("function_name")),
@@ -558,9 +576,9 @@ final class ShowQueriesRewrite
                             ascending("function_type")));
         }
 
-        private static String getFunctionType(SqlFunction function)
+        private static String getFunctionType(FunctionMetadata function)
         {
-            FunctionKind kind = function.getSignature().getKind();
+            FunctionKind kind = function.getKind();
             switch (kind) {
                 case AGGREGATE:
                     return "aggregate";
@@ -598,6 +616,15 @@ final class ShowQueriesRewrite
             // add bogus row so we can support empty sessions
             rows.add(row(new StringLiteral(""), new StringLiteral(""), new StringLiteral(""), new StringLiteral(""), new StringLiteral(""), FALSE_LITERAL));
 
+            Expression predicate = identifier("include");
+            Optional<String> likePattern = node.getLikePattern();
+            if (likePattern.isPresent()) {
+                predicate = and(predicate, new LikePredicate(
+                        identifier("name"),
+                        new StringLiteral(likePattern.get()),
+                        node.getEscape().map(StringLiteral::new)));
+            }
+
             return simpleQuery(
                     selectList(
                             aliasedName("name", "Name"),
@@ -609,7 +636,7 @@ final class ShowQueriesRewrite
                             new Values(rows.build()),
                             "session",
                             ImmutableList.of("name", "value", "default", "type", "description", "include")),
-                    identifier("include"));
+                    predicate);
         }
 
         private Query parseView(String view, QualifiedObjectName name, Node node)

@@ -15,7 +15,6 @@ package io.prestosql.metadata;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
 import io.airlift.slice.Slice;
 import io.airlift.slice.Slices;
 import io.prestosql.operator.scalar.ScalarFunctionImplementation;
@@ -32,7 +31,6 @@ import static io.prestosql.metadata.MetadataManager.createTestMetadataManager;
 import static io.prestosql.metadata.Signature.comparableWithVariadicBound;
 import static io.prestosql.metadata.TestPolymorphicScalarFunction.TestMethods.VARCHAR_TO_BIGINT_RETURN_VALUE;
 import static io.prestosql.metadata.TestPolymorphicScalarFunction.TestMethods.VARCHAR_TO_VARCHAR_RETURN_VALUE;
-import static io.prestosql.operator.TypeSignatureParser.parseTypeSignature;
 import static io.prestosql.operator.scalar.ScalarFunctionImplementation.ArgumentProperty.valueTypeArgumentProperty;
 import static io.prestosql.operator.scalar.ScalarFunctionImplementation.NullConvention.BLOCK_AND_POSITION;
 import static io.prestosql.operator.scalar.ScalarFunctionImplementation.NullConvention.USE_NULL_FLAG;
@@ -41,7 +39,7 @@ import static io.prestosql.spi.function.OperatorType.IS_DISTINCT_FROM;
 import static io.prestosql.spi.type.BigintType.BIGINT;
 import static io.prestosql.spi.type.BooleanType.BOOLEAN;
 import static io.prestosql.spi.type.Decimals.MAX_SHORT_PRECISION;
-import static io.prestosql.spi.type.StandardTypes.VARCHAR;
+import static io.prestosql.spi.type.TypeSignatureParameter.typeVariable;
 import static io.prestosql.spi.type.VarcharType.createVarcharType;
 import static java.util.Arrays.asList;
 import static org.testng.Assert.assertEquals;
@@ -55,7 +53,7 @@ public class TestPolymorphicScalarFunction
             .name("foo")
             .kind(SCALAR)
             .returnType(BIGINT.getTypeSignature())
-            .argumentTypes(parseTypeSignature("varchar(x)", ImmutableSet.of("x")))
+            .argumentTypes(new TypeSignature("varchar", typeVariable("x")))
             .build();
     private static final int INPUT_VARCHAR_LENGTH = 10;
     private static final TypeSignature INPUT_VARCHAR_TYPE = createVarcharType(INPUT_VARCHAR_LENGTH).getTypeSignature();
@@ -64,7 +62,7 @@ public class TestPolymorphicScalarFunction
             ImmutableMap.of("V", METADATA.getType(INPUT_VARCHAR_TYPE)),
             ImmutableMap.of("x", (long) INPUT_VARCHAR_LENGTH));
 
-    private static final TypeSignature DECIMAL_SIGNATURE = parseTypeSignature("decimal(a_precision, a_scale)", ImmutableSet.of("a_precision", "a_scale"));
+    private static final TypeSignature DECIMAL_SIGNATURE = new TypeSignature("decimal", typeVariable("a_precision"), typeVariable("a_scale"));
     private static final BoundVariables LONG_DECIMAL_BOUND_VARIABLES = new BoundVariables(
             ImmutableMap.of(),
             ImmutableMap.of("a_precision", MAX_SHORT_PRECISION + 1L, "a_scale", 2L));
@@ -85,6 +83,9 @@ public class TestPolymorphicScalarFunction
 
         SqlScalarFunction function = SqlScalarFunction.builder(TestMethods.class)
                 .signature(signature)
+                .argumentDefinitions(
+                        new FunctionArgumentDefinition(true),
+                        new FunctionArgumentDefinition(true))
                 .deterministic(true)
                 .choice(choice -> choice
                         .argumentProperties(
@@ -159,8 +160,8 @@ public class TestPolymorphicScalarFunction
         Signature signature = Signature.builder()
                 .name("foo")
                 .kind(SCALAR)
-                .returnType(parseTypeSignature("varchar(x)", ImmutableSet.of("x")))
-                .argumentTypes(parseTypeSignature("varchar(x)", ImmutableSet.of("x")))
+                .returnType(new TypeSignature("varchar", typeVariable("x")))
+                .argumentTypes(new TypeSignature("varchar", typeVariable("x")))
                 .build();
 
         SqlScalarFunction function = SqlScalarFunction.builder(TestMethods.class)
@@ -182,7 +183,7 @@ public class TestPolymorphicScalarFunction
         Signature signature = Signature.builder()
                 .name("foo")
                 .kind(SCALAR)
-                .typeVariableConstraints(comparableWithVariadicBound("V", VARCHAR))
+                .typeVariableConstraints(comparableWithVariadicBound("V", "ROW"))
                 .returnType(new TypeSignature("V"))
                 .argumentTypes(new TypeSignature("V"))
                 .build();
@@ -205,8 +206,8 @@ public class TestPolymorphicScalarFunction
         Signature signature = Signature.builder()
                 .operatorType(ADD)
                 .kind(SCALAR)
-                .returnType(parseTypeSignature("varchar(x)", ImmutableSet.of("x")))
-                .argumentTypes(parseTypeSignature("varchar(x)", ImmutableSet.of("x")))
+                .returnType(new TypeSignature("varchar", typeVariable("x")))
+                .argumentTypes(new TypeSignature("varchar", typeVariable("x")))
                 .build();
 
         SqlScalarFunction function = SqlScalarFunction.builder(TestMethods.class)

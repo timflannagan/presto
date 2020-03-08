@@ -221,6 +221,9 @@ public class MongoSession
 
     public List<MongoIndex> getIndexes(SchemaTableName tableName)
     {
+        if (isView(tableName)) {
+            return ImmutableList.of();
+        }
         return MongoIndex.parse(getCollection(tableName).listIndexes());
     }
 
@@ -538,7 +541,7 @@ public class MongoSession
                 typeSignature = new TypeSignature(StandardTypes.ROW,
                         IntStream.range(0, subTypes.size())
                                 .mapToObj(idx -> TypeSignatureParameter.namedTypeParameter(
-                                        new NamedTypeSignature(Optional.of(new RowFieldName(format("%s%d", implicitPrefix, idx + 1), false)), subTypes.get(idx).get())))
+                                        new NamedTypeSignature(Optional.of(new RowFieldName(format("%s%d", implicitPrefix, idx + 1))), subTypes.get(idx).get())))
                                 .collect(toList()));
             }
         }
@@ -551,11 +554,18 @@ public class MongoSession
                     return Optional.empty();
                 }
 
-                parameters.add(TypeSignatureParameter.namedTypeParameter(new NamedTypeSignature(Optional.of(new RowFieldName(key, false)), fieldType.get())));
+                parameters.add(TypeSignatureParameter.namedTypeParameter(new NamedTypeSignature(Optional.of(new RowFieldName(key)), fieldType.get())));
             }
             typeSignature = new TypeSignature(StandardTypes.ROW, parameters);
         }
 
         return Optional.ofNullable(typeSignature);
+    }
+
+    private boolean isView(SchemaTableName tableName)
+    {
+        MongoCollection views = client.getDatabase(tableName.getSchemaName()).getCollection("system.views");
+        Object view = views.find(new Document("_id", tableName.toString())).first();
+        return view != null;
     }
 }

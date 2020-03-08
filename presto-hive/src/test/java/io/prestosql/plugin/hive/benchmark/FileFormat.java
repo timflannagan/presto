@@ -35,6 +35,7 @@ import io.prestosql.plugin.hive.TypeTranslator;
 import io.prestosql.plugin.hive.benchmark.BenchmarkHiveFileFormat.TestData;
 import io.prestosql.plugin.hive.orc.OrcPageSourceFactory;
 import io.prestosql.plugin.hive.parquet.ParquetPageSourceFactory;
+import io.prestosql.plugin.hive.parquet.ParquetReaderConfig;
 import io.prestosql.plugin.hive.rcfile.RcFilePageSourceFactory;
 import io.prestosql.rcfile.AircompressorCodecFactory;
 import io.prestosql.rcfile.HadoopCodecFactory;
@@ -131,7 +132,7 @@ public enum FileFormat
         @Override
         public ConnectorPageSource createFileFormatReader(ConnectorSession session, HdfsEnvironment hdfsEnvironment, File targetFile, List<String> columnNames, List<Type> columnTypes)
         {
-            HivePageSourceFactory pageSourceFactory = new OrcPageSourceFactory(false, new OrcReaderOptions(), hdfsEnvironment, new FileFormatDataSourceStats());
+            HivePageSourceFactory pageSourceFactory = new OrcPageSourceFactory(new OrcReaderOptions(), hdfsEnvironment, new FileFormatDataSourceStats());
             return createPageSource(pageSourceFactory, session, targetFile, columnNames, columnTypes, HiveStorageFormat.ORC);
         }
 
@@ -157,7 +158,7 @@ public enum FileFormat
         @Override
         public ConnectorPageSource createFileFormatReader(ConnectorSession session, HdfsEnvironment hdfsEnvironment, File targetFile, List<String> columnNames, List<Type> columnTypes)
         {
-            HivePageSourceFactory pageSourceFactory = new ParquetPageSourceFactory(TYPE_MANAGER, hdfsEnvironment, new FileFormatDataSourceStats());
+            HivePageSourceFactory pageSourceFactory = new ParquetPageSourceFactory(TYPE_MANAGER, hdfsEnvironment, new FileFormatDataSourceStats(), new ParquetReaderConfig());
             return createPageSource(pageSourceFactory, session, targetFile, columnNames, columnTypes, HiveStorageFormat.PARQUET);
         }
 
@@ -237,7 +238,7 @@ public enum FileFormat
         @Override
         public ConnectorPageSource createFileFormatReader(ConnectorSession session, HdfsEnvironment hdfsEnvironment, File targetFile, List<String> columnNames, List<Type> columnTypes)
         {
-            HivePageSourceFactory pageSourceFactory = new ParquetPageSourceFactory(TYPE_MANAGER, hdfsEnvironment, new FileFormatDataSourceStats());
+            HivePageSourceFactory pageSourceFactory = new ParquetPageSourceFactory(TYPE_MANAGER, hdfsEnvironment, new FileFormatDataSourceStats(), new ParquetReaderConfig());
             return createPageSource(pageSourceFactory, session, targetFile, columnNames, columnTypes, HiveStorageFormat.PARQUET);
         }
 
@@ -351,7 +352,8 @@ public enum FileFormat
     {
         private final RecordFileWriter recordWriter;
 
-        public RecordFormatWriter(File targetFile,
+        public RecordFormatWriter(
+                File targetFile,
                 List<String> columnNames,
                 List<Type> columnTypes,
                 HiveCompressionCodec compressionCodec,

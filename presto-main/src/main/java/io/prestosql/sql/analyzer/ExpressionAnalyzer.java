@@ -150,6 +150,7 @@ import static io.prestosql.sql.analyzer.Analyzer.verifyNoAggregateWindowOrGroupi
 import static io.prestosql.sql.analyzer.ExpressionTreeUtils.extractLocation;
 import static io.prestosql.sql.analyzer.SemanticExceptions.missingAttributeException;
 import static io.prestosql.sql.analyzer.SemanticExceptions.semanticException;
+import static io.prestosql.sql.analyzer.TypeSignatureTranslator.toTypeSignature;
 import static io.prestosql.sql.tree.ArrayConstructor.ARRAY_CONSTRUCTOR;
 import static io.prestosql.sql.tree.Extract.Field.TIMEZONE_HOUR;
 import static io.prestosql.sql.tree.Extract.Field.TIMEZONE_MINUTE;
@@ -279,12 +280,6 @@ public class ExpressionAnalyzer
     {
         Visitor visitor = new Visitor(baseScope, warningCollector);
         return visitor.process(expression, new StackableAstVisitor.StackableAstVisitorContext<>(context));
-    }
-
-    private List<TypeSignatureProvider> getCallArgumentTypes(List<Expression> arguments, Scope scope)
-    {
-        Visitor visitor = new Visitor(scope, warningCollector);
-        return visitor.getCallArgumentTypes(arguments, new StackableAstVisitor.StackableAstVisitorContext<>(Context.notInLambda(scope)));
     }
 
     public Set<NodeRef<SubqueryExpression>> getScalarSubqueries()
@@ -557,9 +552,7 @@ public class ExpressionAnalyzer
         @Override
         protected Type visitSimpleCaseExpression(SimpleCaseExpression node, StackableAstVisitorContext<Context> context)
         {
-            for (WhenClause whenClause : node.getWhenClauses()) {
-                coerceToSingleType(context, whenClause, "CASE operand type does not match WHEN clause operand type: %s vs %s", node.getOperand(), whenClause.getOperand());
-            }
+            coerceCaseOperandToToSingleType(node, context);
 
             Type type = coerceToSingleType(context,
                     "All CASE results must be the same type: %s",
@@ -572,6 +565,41 @@ public class ExpressionAnalyzer
             }
 
             return type;
+        }
+
+        private void coerceCaseOperandToToSingleType(SimpleCaseExpression node, StackableAstVisitorContext<Context> context)
+        {
+            Type operandType = process(node.getOperand(), context);
+
+            List<WhenClause> whenClauses = node.getWhenClauses();
+            List<Type> whenOperandTypes = new ArrayList<>(whenClauses.size());
+
+            Type commonType = operandType;
+            for (WhenClause whenClause : whenClauses) {
+                Expression whenOperand = whenClause.getOperand();
+                Type whenOperandType = process(whenOperand, context);
+                whenOperandTypes.add(whenOperandType);
+
+                Optional<Type> operandCommonType = typeCoercion.getCommonSuperType(commonType, whenOperandType);
+
+                if (!operandCommonType.isPresent()) {
+                    throw semanticException(TYPE_MISMATCH, whenOperand, "CASE operand type does not match WHEN clause operand type: %s vs %s", operandType, whenOperandType);
+                }
+
+                commonType = operandCommonType.get();
+            }
+
+            if (commonType != operandType) {
+                addOrReplaceExpressionCoercion(node.getOperand(), operandType, commonType);
+            }
+
+            for (int i = 0; i < whenOperandTypes.size(); i++) {
+                Type whenOperandType = whenOperandTypes.get(i);
+                if (!whenOperandType.equals(commonType)) {
+                    Expression whenOperand = whenClauses.get(i).getOperand();
+                    addOrReplaceExpressionCoercion(whenOperand, whenOperandType, commonType);
+                }
+            }
         }
 
         private List<Expression> getCaseResultExpressions(List<WhenClause> whenClauses, Optional<Expression> defaultValue)
@@ -1069,7 +1097,7 @@ public class ExpressionAnalyzer
         {
             Type type;
             try {
-                type = metadata.fromSqlType(node.getType());
+                type = metadata.getType(toTypeSignature(node.getType()));
             }
             catch (TypeNotFoundException e) {
                 throw semanticException(TYPE_MISMATCH, node, "Unknown type: " + node.getType());
@@ -1501,7 +1529,7 @@ public class ExpressionAnalyzer
             WarningCollector warningCollector,
             boolean isDescribe)
     {
-        // expressions at this point can not have sub queries so deny all access checks
+        // expressions at this point cannot have sub queries so deny all access checks
         // in the future, we will need a full access controller here to verify access to functions
         Analysis analysis = new Analysis(null, parameters, isDescribe);
         ExpressionAnalyzer analyzer = create(analysis, session, metadata, sqlParser, new DenyAllAccessControl(), types, warningCollector);
@@ -1558,23 +1586,6 @@ public class ExpressionAnalyzer
                 analyzer.getQuantifiedComparisons(),
                 analyzer.getLambdaArgumentReferences(),
                 analyzer.getWindowFunctions());
-    }
-
-    public static List<TypeSignatureProvider> getCallArgumentTypes(
-            Session session,
-            Metadata metadata,
-            SqlParser sqlParser,
-            TypeProvider types,
-            List<Expression> callArguments,
-            Map<NodeRef<Parameter>, Expression> parameters,
-            WarningCollector warningCollector,
-            boolean isDescribe)
-    {
-        // Expressions at this point can not have sub queries, so deny all access checks.
-        // In the future, we will need a full access controller here to verify access to functions.
-        Analysis analysis = new Analysis(null, parameters, isDescribe);
-        ExpressionAnalyzer analyzer = create(analysis, session, metadata, sqlParser, new DenyAllAccessControl(), types, warningCollector);
-        return analyzer.getCallArgumentTypes(callArguments, Scope.builder().withRelationType(RelationId.anonymous(), new RelationType()).build());
     }
 
     public static ExpressionAnalyzer create(

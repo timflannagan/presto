@@ -13,16 +13,18 @@
  */
 package io.prestosql.plugin.hive;
 
-import io.prestosql.tests.AbstractTestAggregations;
+import io.prestosql.testing.AbstractTestAggregations;
+import io.prestosql.testing.QueryRunner;
 
 import static io.airlift.tpch.TpchTable.getTables;
-import static io.prestosql.plugin.hive.HiveQueryRunner.createQueryRunner;
 
 public class TestHiveDistributedAggregations
         extends AbstractTestAggregations
 {
-    public TestHiveDistributedAggregations()
+    @Override
+    protected QueryRunner createQueryRunner()
+            throws Exception
     {
-        super(() -> createQueryRunner(getTables()));
+        return HiveQueryRunner.createQueryRunner(getTables());
     }
 }

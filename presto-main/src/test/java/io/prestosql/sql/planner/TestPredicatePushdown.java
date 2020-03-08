@@ -16,6 +16,7 @@ package io.prestosql.sql.planner;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import io.prestosql.Session;
+import io.prestosql.metadata.Metadata;
 import io.prestosql.sql.planner.assertions.BasePlanTest;
 import io.prestosql.sql.planner.assertions.PlanMatchPattern;
 import io.prestosql.sql.planner.optimizations.PlanOptimizer;
@@ -29,6 +30,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static io.prestosql.SystemSessionProperties.ENABLE_DYNAMIC_FILTERING;
+import static io.prestosql.metadata.MetadataManager.createTestMetadataManager;
 import static io.prestosql.sql.planner.assertions.PlanMatchPattern.anyTree;
 import static io.prestosql.sql.planner.assertions.PlanMatchPattern.assignUniqueId;
 import static io.prestosql.sql.planner.assertions.PlanMatchPattern.equiJoinClause;
@@ -48,6 +50,8 @@ import static io.prestosql.sql.planner.plan.JoinNode.Type.LEFT;
 public class TestPredicatePushdown
         extends BasePlanTest
 {
+    private final Metadata metadata = createTestMetadataManager();
+
     TestPredicatePushdown()
     {
         super(ImmutableMap.of(ENABLE_DYNAMIC_FILTERING, "true"));
@@ -76,7 +80,7 @@ public class TestPredicatePushdown
                                         project(
                                                 filter(
                                                         "CAST('x' AS varchar(4)) = CAST(u_v AS varchar(4))",
-                                                        tableScan("nation", ImmutableMap.of("u_k", "nationkey", "u_v", "name"))))))));
+                                                        tableScan("nation", ImmutableMap.of("u_k", "nationkey", "u_v", "name"))))), metadata)));
 
         // values have different types (varchar(4) vs varchar(5)) in each table
         assertPlan(
@@ -95,7 +99,7 @@ public class TestPredicatePushdown
                                         project(
                                                 filter(
                                                         "CAST('x' AS varchar(5)) = CAST(u_v AS varchar(5))",
-                                                        tableScan("nation", ImmutableMap.of("u_k", "nationkey", "u_v", "name"))))))));
+                                                        tableScan("nation", ImmutableMap.of("u_k", "nationkey", "u_v", "name"))))), metadata)));
     }
 
     @Test
@@ -486,7 +490,7 @@ public class TestPredicatePushdown
         assertPlan(
                 "SELECT t1.orderstatus " +
                         "FROM (SELECT orderstatus FROM orders WHERE rand() = orderkey AND orderkey = 123) t1, (VALUES 'F', 'K') t2(col) " +
-                        "WHERE t1.orderstatus = t2.col AND (t2.col = 'F' OR t2.col = 'K') AND t1.orderstatus LIKE '%'",
+                        "WHERE t1.orderstatus = t2.col AND (t2.col = 'F' OR t2.col = 'K') AND length(t1.orderstatus) < 42",
                 Session.builder(getQueryRunner().getDefaultSession())
                         .setSystemProperty(ENABLE_DYNAMIC_FILTERING, "false")
                         .build(),
@@ -494,7 +498,7 @@ public class TestPredicatePushdown
                         node(
                                 JoinNode.class,
                                 node(ProjectNode.class,
-                                        filter("(ORDERKEY = BIGINT '123') AND rand() = CAST(ORDERKEY AS double) AND ORDERSTATUS LIKE '%'",
+                                        filter("(ORDERKEY = BIGINT '123') AND rand() = CAST(ORDERKEY AS double) AND length(ORDERSTATUS) < BIGINT '42'",
                                                 tableScan(
                                                         "orders",
                                                         ImmutableMap.of(

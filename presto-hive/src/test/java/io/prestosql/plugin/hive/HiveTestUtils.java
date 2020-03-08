@@ -34,6 +34,8 @@ import io.prestosql.plugin.hive.parquet.ParquetWriterConfig;
 import io.prestosql.plugin.hive.rcfile.RcFilePageSourceFactory;
 import io.prestosql.plugin.hive.s3.HiveS3Config;
 import io.prestosql.plugin.hive.s3.PrestoS3ConfigurationInitializer;
+import io.prestosql.plugin.hive.s3select.PrestoS3ClientFactory;
+import io.prestosql.plugin.hive.s3select.S3SelectRecordCursorProvider;
 import io.prestosql.spi.PageSorter;
 import io.prestosql.spi.block.Block;
 import io.prestosql.spi.connector.ColumnHandle;
@@ -54,11 +56,11 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.Set;
 
+import static com.google.common.collect.ImmutableList.toImmutableList;
 import static io.airlift.units.DataSize.Unit.MEGABYTE;
 import static io.prestosql.metadata.MetadataManager.createTestMetadataManager;
 import static io.prestosql.spi.function.OperatorType.IS_DISTINCT_FROM;
 import static io.prestosql.spi.type.Decimals.encodeScaledValue;
-import static java.util.stream.Collectors.toList;
 
 public final class HiveTestUtils
 {
@@ -75,33 +77,43 @@ public final class HiveTestUtils
 
     public static ConnectorSession getHiveSession(HiveConfig hiveConfig)
     {
-        return new TestingConnectorSession(getHiveSessionProperties(hiveConfig).getSessionProperties());
+        return getHiveSession(hiveConfig, new OrcReaderConfig());
+    }
+
+    public static TestingConnectorSession getHiveSession(HiveConfig hiveConfig, OrcReaderConfig orcReaderConfig)
+    {
+        return new TestingConnectorSession(getHiveSessionProperties(hiveConfig, orcReaderConfig).getSessionProperties());
     }
 
     public static HiveSessionProperties getHiveSessionProperties(HiveConfig hiveConfig)
     {
+        return getHiveSessionProperties(hiveConfig, new OrcReaderConfig());
+    }
+
+    public static HiveSessionProperties getHiveSessionProperties(HiveConfig hiveConfig, OrcReaderConfig orcReaderConfig)
+    {
         return new HiveSessionProperties(
                 hiveConfig,
-                new OrcReaderConfig(),
+                orcReaderConfig,
                 new OrcWriterConfig(),
                 new ParquetReaderConfig(),
                 new ParquetWriterConfig());
     }
 
-    public static Set<HivePageSourceFactory> getDefaultHivePageSourceFactories(HiveConfig hiveConfig, HdfsEnvironment hdfsEnvironment)
+    public static Set<HivePageSourceFactory> getDefaultHivePageSourceFactories(HdfsEnvironment hdfsEnvironment)
     {
         FileFormatDataSourceStats stats = new FileFormatDataSourceStats();
         return ImmutableSet.<HivePageSourceFactory>builder()
                 .add(new RcFilePageSourceFactory(TYPE_MANAGER, hdfsEnvironment, stats))
                 .add(new OrcPageSourceFactory(new OrcReaderConfig(), hdfsEnvironment, stats))
-                .add(new ParquetPageSourceFactory(TYPE_MANAGER, hdfsEnvironment, stats))
+                .add(new ParquetPageSourceFactory(TYPE_MANAGER, hdfsEnvironment, stats, new ParquetReaderConfig()))
                 .build();
     }
 
-    public static Set<HiveRecordCursorProvider> getDefaultHiveRecordCursorProvider(HiveConfig hiveConfig, HdfsEnvironment hdfsEnvironment)
+    public static Set<HiveRecordCursorProvider> getDefaultHiveRecordCursorProviders(HiveConfig hiveConfig, HdfsEnvironment hdfsEnvironment)
     {
         return ImmutableSet.<HiveRecordCursorProvider>builder()
-                .add(new GenericHiveRecordCursorProvider(hdfsEnvironment, hiveConfig))
+                .add(new S3SelectRecordCursorProvider(hdfsEnvironment, new PrestoS3ClientFactory(hiveConfig)))
                 .build();
     }
 
@@ -139,7 +151,7 @@ public final class HiveTestUtils
         return new GenericHiveRecordCursorProvider(hdfsEnvironment, new DataSize(100, MEGABYTE));
     }
 
-    public static HdfsEnvironment createTestHdfsEnvironment()
+    private static HdfsEnvironment createTestHdfsEnvironment()
     {
         HdfsConfiguration hdfsConfig = new HiveHdfsConfiguration(
                 new HdfsConfigurationInitializer(
@@ -171,7 +183,7 @@ public final class HiveTestUtils
                 StandardTypes.ROW,
                 ImmutableList.copyOf(elementTypeSignatures.stream()
                         .map(TypeSignatureParameter::namedTypeParameter)
-                        .collect(toList())));
+                        .collect(toImmutableList())));
     }
 
     public static Long shortDecimal(String value)

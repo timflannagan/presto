@@ -24,8 +24,8 @@ import io.prestosql.spi.QueryId;
 import io.prestosql.spi.eventlistener.QueryCompletedEvent;
 import io.prestosql.spi.eventlistener.QueryCreatedEvent;
 import io.prestosql.spi.eventlistener.SplitCompletedEvent;
+import io.prestosql.testing.DistributedQueryRunner;
 import io.prestosql.testing.MaterializedResult;
-import io.prestosql.tests.DistributedQueryRunner;
 import org.intellij.lang.annotations.Language;
 import org.testng.annotations.AfterClass;
 import org.testng.annotations.BeforeClass;
@@ -64,7 +64,7 @@ public class TestEventListener
                 .setSchema("tiny")
                 .setClientInfo("{\"clientVersion\":\"testVersion\"}")
                 .build();
-        queryRunner = new DistributedQueryRunner(session, 1);
+        queryRunner = DistributedQueryRunner.builder(session).setNodeCount(1).build();
         queryRunner.installPlugin(new TpchPlugin());
         queryRunner.installPlugin(new TestingEventListenerPlugin(generatedEvents));
         queryRunner.installPlugin(new ResourceGroupManagerPlugin());

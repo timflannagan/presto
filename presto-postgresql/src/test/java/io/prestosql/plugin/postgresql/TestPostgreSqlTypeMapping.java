@@ -13,26 +13,33 @@
  */
 package io.prestosql.plugin.postgresql;
 
+import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import io.airlift.json.JsonCodec;
 import io.prestosql.Session;
+import io.prestosql.plugin.jdbc.UnsupportedTypeHandling;
 import io.prestosql.spi.type.ArrayType;
 import io.prestosql.spi.type.TimeZoneKey;
+import io.prestosql.testing.AbstractTestQueryFramework;
+import io.prestosql.testing.QueryRunner;
 import io.prestosql.testing.TestingSession;
-import io.prestosql.tests.AbstractTestQueryFramework;
-import io.prestosql.tests.datatype.CreateAndInsertDataSetup;
-import io.prestosql.tests.datatype.CreateAsSelectDataSetup;
-import io.prestosql.tests.datatype.DataSetup;
-import io.prestosql.tests.datatype.DataType;
-import io.prestosql.tests.datatype.DataTypeTest;
-import io.prestosql.tests.sql.JdbcSqlExecutor;
-import io.prestosql.tests.sql.PrestoSqlExecutor;
+import io.prestosql.testing.datatype.CreateAndInsertDataSetup;
+import io.prestosql.testing.datatype.CreateAndPrestoInsertDataSetup;
+import io.prestosql.testing.datatype.CreateAsSelectDataSetup;
+import io.prestosql.testing.datatype.DataSetup;
+import io.prestosql.testing.datatype.DataType;
+import io.prestosql.testing.datatype.DataTypeTest;
+import io.prestosql.testing.sql.JdbcSqlExecutor;
+import io.prestosql.testing.sql.PrestoSqlExecutor;
+import io.prestosql.testing.sql.TestTable;
 import org.testng.annotations.AfterClass;
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -47,7 +54,18 @@ import java.util.stream.Stream;
 
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Verify.verify;
+import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.io.BaseEncoding.base16;
+import static io.airlift.json.JsonCodec.listJsonCodec;
+import static io.airlift.json.JsonCodec.mapJsonCodec;
+import static io.prestosql.plugin.jdbc.DecimalConfig.DecimalMapping.ALLOW_OVERFLOW;
+import static io.prestosql.plugin.jdbc.DecimalConfig.DecimalMapping.STRICT;
+import static io.prestosql.plugin.jdbc.DecimalSessionPropertiesProvider.DECIMAL_DEFAULT_SCALE;
+import static io.prestosql.plugin.jdbc.DecimalSessionPropertiesProvider.DECIMAL_MAPPING;
+import static io.prestosql.plugin.jdbc.DecimalSessionPropertiesProvider.DECIMAL_ROUNDING_MODE;
+import static io.prestosql.plugin.jdbc.TypeHandlingJdbcPropertiesProvider.UNSUPPORTED_TYPE_HANDLING;
+import static io.prestosql.plugin.jdbc.UnsupportedTypeHandling.CONVERT_TO_VARCHAR;
+import static io.prestosql.plugin.jdbc.UnsupportedTypeHandling.IGNORE;
 import static io.prestosql.plugin.postgresql.PostgreSqlConfig.ArrayMapping.AS_ARRAY;
 import static io.prestosql.plugin.postgresql.PostgreSqlConfig.ArrayMapping.AS_JSON;
 import static io.prestosql.plugin.postgresql.PostgreSqlQueryRunner.createPostgreSqlQueryRunner;
@@ -57,23 +75,25 @@ import static io.prestosql.spi.type.TimestampWithTimeZoneType.TIMESTAMP_WITH_TIM
 import static io.prestosql.spi.type.TypeSignature.mapType;
 import static io.prestosql.spi.type.VarbinaryType.VARBINARY;
 import static io.prestosql.spi.type.VarcharType.VARCHAR;
-import static io.prestosql.tests.datatype.DataType.bigintDataType;
-import static io.prestosql.tests.datatype.DataType.booleanDataType;
-import static io.prestosql.tests.datatype.DataType.dataType;
-import static io.prestosql.tests.datatype.DataType.dateDataType;
-import static io.prestosql.tests.datatype.DataType.decimalDataType;
-import static io.prestosql.tests.datatype.DataType.doubleDataType;
-import static io.prestosql.tests.datatype.DataType.formatStringLiteral;
-import static io.prestosql.tests.datatype.DataType.integerDataType;
-import static io.prestosql.tests.datatype.DataType.jsonDataType;
-import static io.prestosql.tests.datatype.DataType.realDataType;
-import static io.prestosql.tests.datatype.DataType.smallintDataType;
-import static io.prestosql.tests.datatype.DataType.timestampDataType;
-import static io.prestosql.tests.datatype.DataType.varbinaryDataType;
-import static io.prestosql.tests.datatype.DataType.varcharDataType;
+import static io.prestosql.testing.datatype.DataType.bigintDataType;
+import static io.prestosql.testing.datatype.DataType.booleanDataType;
+import static io.prestosql.testing.datatype.DataType.dataType;
+import static io.prestosql.testing.datatype.DataType.dateDataType;
+import static io.prestosql.testing.datatype.DataType.decimalDataType;
+import static io.prestosql.testing.datatype.DataType.doubleDataType;
+import static io.prestosql.testing.datatype.DataType.formatStringLiteral;
+import static io.prestosql.testing.datatype.DataType.integerDataType;
+import static io.prestosql.testing.datatype.DataType.jsonDataType;
+import static io.prestosql.testing.datatype.DataType.realDataType;
+import static io.prestosql.testing.datatype.DataType.smallintDataType;
+import static io.prestosql.testing.datatype.DataType.timestampDataType;
+import static io.prestosql.testing.datatype.DataType.varbinaryDataType;
+import static io.prestosql.testing.datatype.DataType.varcharDataType;
 import static io.prestosql.type.JsonType.JSON;
 import static io.prestosql.type.UuidType.UUID;
 import static java.lang.String.format;
+import static java.math.RoundingMode.HALF_UP;
+import static java.math.RoundingMode.UNNECESSARY;
 import static java.nio.charset.StandardCharsets.UTF_16LE;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.time.ZoneOffset.UTC;
@@ -87,7 +107,9 @@ import static java.util.stream.Collectors.toList;
 public class TestPostgreSqlTypeMapping
         extends AbstractTestQueryFramework
 {
-    private final TestingPostgreSqlServer postgreSqlServer;
+    private static final JsonCodec<List<Map<String, String>>> HSTORE_CODEC = listJsonCodec(mapJsonCodec(String.class, String.class));
+
+    private TestingPostgreSqlServer postgreSqlServer;
 
     private LocalDateTime beforeEpoch;
     private LocalDateTime epoch;
@@ -107,18 +129,15 @@ public class TestPostgreSqlTypeMapping
     private ZoneId kathmandu;
     private LocalDateTime timeGapInKathmandu;
 
-    public TestPostgreSqlTypeMapping()
+    @Override
+    protected QueryRunner createQueryRunner()
+            throws Exception
     {
-        this(new TestingPostgreSqlServer());
-    }
-
-    private TestPostgreSqlTypeMapping(TestingPostgreSqlServer postgreSqlServer)
-    {
-        super(() -> createPostgreSqlQueryRunner(
+        this.postgreSqlServer = new TestingPostgreSqlServer();
+        return createPostgreSqlQueryRunner(
                 postgreSqlServer,
-                ImmutableMap.of("jdbc-types-mapped-to-varchar", "tsrange, inet"),
-                ImmutableList.of()));
-        this.postgreSqlServer = postgreSqlServer;
+                ImmutableMap.of("jdbc-types-mapped-to-varchar", "Tsrange, Inet" /* make sure that types are compared case insensitively */),
+                ImmutableList.of());
     }
 
     @AfterClass(alwaysRun = true)
@@ -317,6 +336,19 @@ public class TestPostgreSqlTypeMapping
                     sessionWithArrayAsArray(),
                     "SELECT * FROM tpch.test_forced_varchar_mapping",
                     "VALUES ('[\"2010-01-01 14:30:00\",\"2010-01-01 15:30:00\")','172.0.0.1',ARRAY['[\"2010-01-01 14:30:00\",\"2010-01-01 15:30:00\")'])");
+
+            // test predicate pushdown to column that has forced varchar mapping
+            assertQuery(
+                    "SELECT 1 FROM tpch.test_forced_varchar_mapping WHERE tsrange_col = '[\"2010-01-01 14:30:00\",\"2010-01-01 15:30:00\")'",
+                    "VALUES 1");
+            assertQuery(
+                    "SELECT 1 FROM tpch.test_forced_varchar_mapping WHERE tsrange_col = 'some value'",
+                    "SELECT 1 WHERE false");
+
+            // test insert into column that has forced varchar mapping
+            assertQueryFails(
+                    "INSERT INTO tpch.test_forced_varchar_mapping (tsrange_col) VALUES ('some value')",
+                    "Underlying type that is mapped to VARCHAR is not supported for INSERT: tsrange");
         }
         finally {
             jdbcSqlExecutor.execute("DROP TABLE tpch.test_forced_varchar_mapping");
@@ -324,9 +356,259 @@ public class TestPostgreSqlTypeMapping
     }
 
     @Test
-    public void testDecimalExceedingPrecisionMax()
+    public void testDecimalExceedingPrecisionMaxIgnored()
     {
-        testUnsupportedDataType("decimal(50,0)");
+        testUnsupportedDataTypeAsIgnored("decimal(50,0)", "12345678901234567890123456789012345678901234567890");
+    }
+
+    @Test
+    public void testDecimalExceedingPrecisionMaxConvertedToVarchar()
+    {
+        testUnsupportedDataTypeConvertedToVarchar(
+                "decimal(50,0)",
+                "12345678901234567890123456789012345678901234567890",
+                "'12345678901234567890123456789012345678901234567890'");
+    }
+
+    @Test
+    public void testDecimalExceedingPrecisionMaxWithExceedingIntegerValues()
+    {
+        JdbcSqlExecutor jdbcSqlExecutor = new JdbcSqlExecutor(postgreSqlServer.getJdbcUrl());
+
+        try (TestTable testTable = new TestTable(
+                jdbcSqlExecutor,
+                "tpch.test_exceeding_max_decimal",
+                "(d_col decimal(65,25))",
+                asList("1234567890123456789012345678901234567890.123456789", "-1234567890123456789012345678901234567890.123456789"))) {
+            assertQuery(
+                    sessionWithDecimalMappingAllowOverflow(UNNECESSARY, 0),
+                    format("SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'tpch' AND table_schema||'.'||table_name = '%s'", testTable.getName()),
+                    "VALUES ('d_col', 'decimal(38,0)')");
+            assertQueryFails(
+                    sessionWithDecimalMappingAllowOverflow(UNNECESSARY, 0),
+                    "SELECT d_col FROM " + testTable.getName(),
+                    "Rounding necessary");
+            assertQueryFails(
+                    sessionWithDecimalMappingAllowOverflow(HALF_UP, 0),
+                    "SELECT d_col FROM " + testTable.getName(),
+                    "Decimal overflow");
+            assertQuery(
+                    sessionWithDecimalMappingStrict(CONVERT_TO_VARCHAR),
+                    format("SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'tpch' AND table_schema||'.'||table_name = '%s'", testTable.getName()),
+                    "VALUES ('d_col', 'varchar')");
+            assertQuery(
+                    sessionWithDecimalMappingStrict(CONVERT_TO_VARCHAR),
+                    "SELECT d_col FROM " + testTable.getName(),
+                    "VALUES ('1234567890123456789012345678901234567890.1234567890000000000000000'), ('-1234567890123456789012345678901234567890.1234567890000000000000000')");
+        }
+    }
+
+    @Test
+    public void testDecimalExceedingPrecisionMaxWithNonExceedingIntegerValues()
+    {
+        JdbcSqlExecutor jdbcSqlExecutor = new JdbcSqlExecutor(postgreSqlServer.getJdbcUrl());
+
+        try (TestTable testTable = new TestTable(
+                jdbcSqlExecutor,
+                "tpch.test_exceeding_max_decimal",
+                "(d_col decimal(60,20))",
+                asList("123456789012345678901234567890.123456789012345", "-123456789012345678901234567890.123456789012345"))) {
+            assertQuery(
+                    sessionWithDecimalMappingAllowOverflow(UNNECESSARY, 0),
+                    format("SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'tpch' AND table_schema||'.'||table_name = '%s'", testTable.getName()),
+                    "VALUES ('d_col', 'decimal(38,0)')");
+            assertQueryFails(
+                    sessionWithDecimalMappingAllowOverflow(UNNECESSARY, 0),
+                    "SELECT d_col FROM " + testTable.getName(),
+                    "Rounding necessary");
+            assertQuery(
+                    sessionWithDecimalMappingAllowOverflow(HALF_UP, 0),
+                    "SELECT d_col FROM " + testTable.getName(),
+                    "VALUES (123456789012345678901234567890), (-123456789012345678901234567890)");
+            assertQuery(
+                    sessionWithDecimalMappingAllowOverflow(UNNECESSARY, 8),
+                    format("SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'tpch' AND table_schema||'.'||table_name = '%s'", testTable.getName()),
+                    "VALUES ('d_col', 'decimal(38,8)')");
+            assertQueryFails(
+                    sessionWithDecimalMappingAllowOverflow(UNNECESSARY, 8),
+                    "SELECT d_col FROM " + testTable.getName(),
+                    "Rounding necessary");
+            assertQuery(
+                    sessionWithDecimalMappingAllowOverflow(HALF_UP, 8),
+                    "SELECT d_col FROM " + testTable.getName(),
+                    "VALUES (123456789012345678901234567890.12345679), (-123456789012345678901234567890.12345679)");
+            assertQuery(
+                    sessionWithDecimalMappingAllowOverflow(HALF_UP, 22),
+                    format("SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'tpch' AND table_schema||'.'||table_name = '%s'", testTable.getName()),
+                    "VALUES ('d_col', 'decimal(38,20)')");
+            assertQueryFails(
+                    sessionWithDecimalMappingAllowOverflow(HALF_UP, 20),
+                    "SELECT d_col FROM " + testTable.getName(),
+                    "Decimal overflow");
+            assertQueryFails(
+                    sessionWithDecimalMappingAllowOverflow(HALF_UP, 9),
+                    "SELECT d_col FROM " + testTable.getName(),
+                    "Decimal overflow");
+            assertQuery(
+                    sessionWithDecimalMappingStrict(CONVERT_TO_VARCHAR),
+                    format("SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'tpch' AND table_schema||'.'||table_name = '%s'", testTable.getName()),
+                    "VALUES ('d_col', 'varchar')");
+            assertQuery(
+                    sessionWithDecimalMappingStrict(CONVERT_TO_VARCHAR),
+                    "SELECT d_col FROM " + testTable.getName(),
+                    "VALUES ('123456789012345678901234567890.12345678901234500000'), ('-123456789012345678901234567890.12345678901234500000')");
+        }
+    }
+
+    @Test(dataProvider = "testDecimalExceedingPrecisionMaxProvider")
+    public void testDecimalExceedingPrecisionMaxWithSupportedValues(int typePrecision, int typeScale)
+    {
+        JdbcSqlExecutor jdbcSqlExecutor = new JdbcSqlExecutor(postgreSqlServer.getJdbcUrl());
+
+        try (TestTable testTable = new TestTable(
+                jdbcSqlExecutor,
+                "tpch.test_exceeding_max_decimal",
+                format("(d_col decimal(%d,%d))", typePrecision, typeScale),
+                asList("12.01", "-12.01", "123", "-123", "1.12345678", "-1.12345678"))) {
+            assertQuery(
+                    sessionWithDecimalMappingAllowOverflow(UNNECESSARY, 0),
+                    format("SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'tpch' AND table_schema||'.'||table_name = '%s'", testTable.getName()),
+                    "VALUES ('d_col', 'decimal(38,0)')");
+            assertQueryFails(
+                    sessionWithDecimalMappingAllowOverflow(UNNECESSARY, 0),
+                    "SELECT d_col FROM " + testTable.getName(),
+                    "Rounding necessary");
+            assertQuery(
+                    sessionWithDecimalMappingAllowOverflow(HALF_UP, 0),
+                    "SELECT d_col FROM " + testTable.getName(),
+                    "VALUES (12), (-12), (123), (-123), (1), (-1)");
+            assertQuery(
+                    sessionWithDecimalMappingAllowOverflow(HALF_UP, 3),
+                    format("SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'tpch' AND table_schema||'.'||table_name = '%s'", testTable.getName()),
+                    "VALUES ('d_col', 'decimal(38,3)')");
+            assertQuery(
+                    sessionWithDecimalMappingAllowOverflow(HALF_UP, 3),
+                    "SELECT d_col FROM " + testTable.getName(),
+                    "VALUES (12.01), (-12.01), (123), (-123), (1.123), (-1.123)");
+            assertQueryFails(
+                    sessionWithDecimalMappingAllowOverflow(UNNECESSARY, 3),
+                    "SELECT d_col FROM " + testTable.getName(),
+                    "Rounding necessary");
+            assertQuery(
+                    sessionWithDecimalMappingAllowOverflow(HALF_UP, 8),
+                    format("SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'tpch' AND table_schema||'.'||table_name = '%s'", testTable.getName()),
+                    "VALUES ('d_col', 'decimal(38,8)')");
+            assertQuery(
+                    sessionWithDecimalMappingAllowOverflow(HALF_UP, 8),
+                    "SELECT d_col FROM " + testTable.getName(),
+                    "VALUES (12.01), (-12.01), (123), (-123), (1.12345678), (-1.12345678)");
+            assertQuery(
+                    sessionWithDecimalMappingAllowOverflow(HALF_UP, 9),
+                    "SELECT d_col FROM " + testTable.getName(),
+                    "VALUES (12.01), (-12.01), (123), (-123), (1.12345678), (-1.12345678)");
+            assertQuery(
+                    sessionWithDecimalMappingAllowOverflow(UNNECESSARY, 8),
+                    "SELECT d_col FROM " + testTable.getName(),
+                    "VALUES (12.01), (-12.01), (123), (-123), (1.12345678), (-1.12345678)");
+        }
+    }
+
+    @DataProvider
+    public Object[][] testDecimalExceedingPrecisionMaxProvider()
+    {
+        return new Object[][] {
+                {40, 8},
+                {50, 10},
+        };
+    }
+
+    @Test
+    public void testDecimalUnspecifiedPrecisionWithSupportedValues()
+    {
+        JdbcSqlExecutor jdbcSqlExecutor = new JdbcSqlExecutor(postgreSqlServer.getJdbcUrl());
+
+        try (TestTable testTable = new TestTable(
+                jdbcSqlExecutor,
+                "tpch.test_var_decimal",
+                "(d_col decimal)",
+                asList("1.12", "123456.789", "-1.12", "-123456.789"))) {
+            assertQuery(
+                    sessionWithDecimalMappingAllowOverflow(UNNECESSARY, 0),
+                    format("SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'tpch' AND table_schema||'.'||table_name = '%s'", testTable.getName()),
+                    "VALUES ('d_col','decimal(38,0)')");
+            assertQueryFails(
+                    sessionWithDecimalMappingAllowOverflow(UNNECESSARY, 0),
+                    "SELECT d_col FROM " + testTable.getName(),
+                    "Rounding necessary");
+            assertQuery(
+                    sessionWithDecimalMappingAllowOverflow(HALF_UP, 0),
+                    "SELECT d_col FROM " + testTable.getName(),
+                    "VALUES (1), (123457), (-1), (-123457)");
+            assertQueryFails(
+                    sessionWithDecimalMappingAllowOverflow(UNNECESSARY, 1),
+                    "SELECT d_col FROM " + testTable.getName(),
+                    "Rounding necessary");
+            assertQuery(
+                    sessionWithDecimalMappingAllowOverflow(HALF_UP, 1),
+                    format("SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'tpch' AND table_schema||'.'||table_name = '%s'", testTable.getName()),
+                    "VALUES ('d_col','decimal(38,1)')");
+            assertQuery(
+                    sessionWithDecimalMappingAllowOverflow(HALF_UP, 1),
+                    "SELECT d_col FROM " + testTable.getName(),
+                    "VALUES (1.1), (123456.8), (-1.1), (-123456.8)");
+            assertQueryFails(
+                    sessionWithDecimalMappingAllowOverflow(UNNECESSARY, 2),
+                    "SELECT d_col FROM " + testTable.getName(),
+                    "Rounding necessary");
+            assertQuery(
+                    sessionWithDecimalMappingAllowOverflow(HALF_UP, 2),
+                    "SELECT d_col FROM " + testTable.getName(),
+                    "VALUES (1.12), (123456.79), (-1.12), (-123456.79)");
+            assertQuery(
+                    sessionWithDecimalMappingAllowOverflow(UNNECESSARY, 3),
+                    format("SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'tpch' AND table_schema||'.'||table_name = '%s'", testTable.getName()),
+                    "VALUES ('d_col','decimal(38,3)')");
+            assertQuery(
+                    sessionWithDecimalMappingAllowOverflow(UNNECESSARY, 3),
+                    "SELECT d_col FROM " + testTable.getName(),
+                    "VALUES (1.12), (123456.789), (-1.12), (-123456.789)");
+        }
+    }
+
+    @Test
+    public void testDecimalUnspecifiedPrecisionWithExceedingValue()
+    {
+        JdbcSqlExecutor jdbcSqlExecutor = new JdbcSqlExecutor(postgreSqlServer.getJdbcUrl());
+        try (TestTable testTable = new TestTable(
+                jdbcSqlExecutor,
+                "tpch.test_var_decimal_with_exceeding_value",
+                "(key varchar(5), d_col decimal)",
+                asList("NULL, '1.12'", "NULL, '1234567890123456789012345678901234567890.1234567'"))) {
+            assertQuery(
+                    sessionWithDecimalMappingAllowOverflow(UNNECESSARY, 0),
+                    format("SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'tpch' AND table_schema||'.'||table_name = '%s'", testTable.getName()),
+                    "VALUES ('key', 'varchar(5)'),('d_col', 'decimal(38,0)')");
+            assertQueryFails(
+                    sessionWithDecimalMappingAllowOverflow(UNNECESSARY, 0),
+                    "SELECT * FROM " + testTable.getName(),
+                    "Rounding necessary");
+            assertQueryFails(
+                    sessionWithDecimalMappingAllowOverflow(HALF_UP, 0),
+                    "SELECT * FROM " + testTable.getName(),
+                    "Decimal overflow");
+            assertQuery(
+                    sessionWithDecimalMappingStrict(CONVERT_TO_VARCHAR),
+                    format("SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'tpch' AND table_schema||'.'||table_name = '%s'", testTable.getName()),
+                    "VALUES ('key', 'varchar(5)'),('d_col', 'varchar')");
+            assertQuery(
+                    sessionWithDecimalMappingStrict(CONVERT_TO_VARCHAR),
+                    "SELECT * FROM " + testTable.getName(),
+                    "VALUES (NULL, '1.12'), (NULL, '1234567890123456789012345678901234567890.1234567')");
+            assertQuery(
+                    sessionWithDecimalMappingStrict(IGNORE),
+                    format("SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'tpch' AND table_schema||'.'||table_name = '%s'", testTable.getName()),
+                    "VALUES ('key', 'varchar(5)')");
+        }
     }
 
     @Test
@@ -512,12 +794,52 @@ public class TestPostgreSqlTypeMapping
                 .execute(getQueryRunner(), session, postgresCreateAndInsert("tpch.test_integer_array_as_json"));
 
         DataTypeTest.create()
+                .addRoundTrip(arrayAsJsonDataType("double precision[]"), null)
+                .addRoundTrip(arrayAsJsonDataType("double precision[]"), "[[[1.1,2.2,3.3],[4.4,5.5,6.6]]]")
+                .addRoundTrip(arrayAsJsonDataType("double precision[100][100][100]"), "[42.3]")
+                .addRoundTrip(arrayAsJsonDataType("double precision[]"), "[[[null,null]]]")
+                .addRoundTrip(arrayAsJsonDataType("double precision[]"), "[]")
+                .addRoundTrip(arrayAsJsonDataType("_float8"), "[]")
+                .addRoundTrip(arrayAsJsonDataType("_float8"), "[[1.1],[2.2]]")
+                .execute(getQueryRunner(), session, postgresCreateAndInsert("tpch.test_double_array_as_json"));
+
+        DataTypeTest.create()
+                .addRoundTrip(arrayAsJsonDataType("real[]"), null)
+                .addRoundTrip(arrayAsJsonDataType("real[]"), "[[[1.1,2.2,3.3],[4.4,5.5,6.6]]]")
+                .addRoundTrip(arrayAsJsonDataType("real[100][100][100]"), "[42.3]")
+                .addRoundTrip(arrayAsJsonDataType("real[]"), "[[[null,null]]]")
+                .addRoundTrip(arrayAsJsonDataType("real[]"), "[]")
+                .addRoundTrip(arrayAsJsonDataType("_float4"), "[]")
+                .addRoundTrip(arrayAsJsonDataType("_float4"), "[[1.1],[2.2]]")
+                .execute(getQueryRunner(), session, postgresCreateAndInsert("tpch.test_real_array_as_json"));
+
+        DataTypeTest.create()
                 .addRoundTrip(arrayAsJsonDataType("varchar[]"), null)
                 .addRoundTrip(arrayAsJsonDataType("varchar[]"), "[\"text\"]")
                 .addRoundTrip(arrayAsJsonDataType("_text"), "[[\"one\",\"two\"],[\"three\",\"four\"]]")
                 .addRoundTrip(arrayAsJsonDataType("_text"), "[[\"one\",null]]")
                 .addRoundTrip(arrayAsJsonDataType("_text"), "[]")
                 .execute(getQueryRunner(), session, postgresCreateAndInsert("tpch.test_varchar_array_as_json"));
+
+        DataTypeTest.create()
+                .addRoundTrip(arrayAsJsonDataType("date[]"), null)
+                .addRoundTrip(arrayAsJsonDataType("date[]"), "[\"2019-01-02\"]")
+                .addRoundTrip(arrayAsJsonDataType("date[]"), "[null,null]")
+                .execute(getQueryRunner(), session, postgresCreateAndInsert("tpch.test_timestamp_array_as_json"));
+
+        DataTypeTest.create()
+                .addRoundTrip(arrayAsJsonDataType("timestamp[]"), null)
+                .addRoundTrip(arrayAsJsonDataType("timestamp[]"), "[\"2019-01-02 03:04:05.789\"]")
+                .addRoundTrip(arrayAsJsonDataType("timestamp[]"), "[null,null]")
+                .execute(getQueryRunner(), session, postgresCreateAndInsert("tpch.test_timestamp_array_as_json"));
+
+        DataTypeTest.create()
+                .addRoundTrip(arrayAsJsonDataType("hstore[]"), null)
+                .addRoundTrip(arrayAsJsonDataType("hstore[]"), "[]")
+                .addRoundTrip(arrayAsJsonDataType("hstore[]"), "[null,null]")
+                .addRoundTrip(hstoreArrayAsJsonDataType(), "[{\"a\":\"1\",\"b\":\"2\"},{\"a\":\"3\",\"d\":\"4\"}]")
+                .addRoundTrip(hstoreArrayAsJsonDataType(), "[{\"a\":null,\"b\":\"2\"}]")
+                .execute(getQueryRunner(), session, postgresCreateAndInsert("tpch.test_hstore_array_as_json"));
     }
 
     private static <E> DataType<List<E>> arrayDataType(DataType<E> elementType)
@@ -549,6 +871,17 @@ public class TestPostgreSqlTypeMapping
                         .replace("[", "ARRAY[")
                         .replace("\"", "'")
                         + "::" + insertType,
+                identity());
+    }
+
+    private static DataType<String> hstoreArrayAsJsonDataType()
+    {
+        return dataType(
+                "hstore[]",
+                JSON,
+                json -> HSTORE_CODEC.fromJson(json).stream()
+                        .map(TestPostgreSqlTypeMapping::hstoreLiteral)
+                        .collect(joining(",", "ARRAY[", "]")),
                 identity());
     }
 
@@ -818,14 +1151,22 @@ public class TestPostgreSqlTypeMapping
     @Test
     public void testHstore()
     {
-        DataTypeTest.create()
-                .addRoundTrip(hstoreDataType(), null)
-                .addRoundTrip(hstoreDataType(), ImmutableMap.of())
-                .addRoundTrip(hstoreDataType(), ImmutableMap.of("key1", "value1"))
-                .addRoundTrip(hstoreDataType(), ImmutableMap.of("key1", "value1", "key2", "value2", "key3", "value3"))
-                .addRoundTrip(hstoreDataType(), ImmutableMap.of("key1", " \" ", "key2", " ' ", "key3", " ]) "))
-                .addRoundTrip(hstoreDataType(), Collections.singletonMap("key1", null))
+        hstoreTestCases(hstoreDataType())
                 .execute(getQueryRunner(), postgresCreateAndInsert("tpch.postgresql_test_hstore"));
+
+        hstoreTestCases(varcharMapDataType())
+                .execute(getQueryRunner(), postgresCreatePrestoInsert("tpch.postgresql_test_hstore"));
+    }
+
+    private DataTypeTest hstoreTestCases(DataType<Map<String, String>> varcharMapDataType)
+    {
+        return DataTypeTest.create()
+                .addRoundTrip(varcharMapDataType, null)
+                .addRoundTrip(varcharMapDataType, ImmutableMap.of())
+                .addRoundTrip(varcharMapDataType, ImmutableMap.of("key1", "value1"))
+                .addRoundTrip(varcharMapDataType, ImmutableMap.of("key1", "value1", "key2", "value2", "key3", "value3"))
+                .addRoundTrip(varcharMapDataType, ImmutableMap.of("key1", " \" ", "key2", " ' ", "key3", " ]) "))
+                .addRoundTrip(varcharMapDataType, Collections.singletonMap("key1", null));
     }
 
     @Test
@@ -842,18 +1183,75 @@ public class TestPostgreSqlTypeMapping
                 .addRoundTrip(uuidDataType, java.util.UUID.fromString("123e4567-e89b-12d3-a456-426655440000"));
     }
 
-    private void testUnsupportedDataType(String databaseDataType)
+    private void testUnsupportedDataTypeAsIgnored(String dataTypeName, String databaseValue)
     {
         JdbcSqlExecutor jdbcSqlExecutor = new JdbcSqlExecutor(postgreSqlServer.getJdbcUrl());
-        jdbcSqlExecutor.execute(format("CREATE TABLE tpch.test_unsupported_data_type(key varchar(5), unsupported_column %s)", databaseDataType));
-        try {
+        try (TestTable table = new TestTable(
+                jdbcSqlExecutor,
+                "tpch.unsupported_type",
+                format("(key varchar(5), unsupported_column %s)", dataTypeName),
+                ImmutableList.of(
+                        "'1', NULL",
+                        "'2', " + databaseValue))) {
+            assertQuery("SELECT * FROM " + table.getName(), "VALUES 1, 2");
             assertQuery(
-                    "SELECT column_name FROM information_schema.columns WHERE table_schema = 'tpch' AND table_name = 'test_unsupported_data_type'",
-                    "VALUES 'key'"); // no 'unsupported_column'
+                    "DESC " + table.getName(),
+                    "VALUES ('key', 'varchar(5)','', '')"); // no 'unsupported_column'
+
+            assertUpdate(format("INSERT INTO %s VALUES '3'", table.getName()), 1);
+            assertQuery("SELECT * FROM " + table.getName(), "VALUES '1', '2', '3'");
         }
-        finally {
-            jdbcSqlExecutor.execute("DROP TABLE tpch.test_unsupported_data_type");
+    }
+
+    private void testUnsupportedDataTypeConvertedToVarchar(String dataTypeName, String databaseValue, String prestoValue)
+    {
+        JdbcSqlExecutor jdbcSqlExecutor = new JdbcSqlExecutor(postgreSqlServer.getJdbcUrl());
+        try (TestTable table = new TestTable(
+                jdbcSqlExecutor,
+                "tpch.unsupported_type",
+                format("(key varchar(5), unsupported_column %s)", dataTypeName),
+                ImmutableList.of(
+                        "1, NULL",
+                        "2, " + databaseValue))) {
+            Session convertToVarchar = withUnsupportedType(CONVERT_TO_VARCHAR);
+            assertQuery(
+                    convertToVarchar,
+                    "SELECT * FROM " + table.getName(),
+                    format("VALUES ('1', NULL), ('2', %s)", prestoValue));
+            assertQuery(
+                    convertToVarchar,
+                    format("SELECT key FROM %s WHERE unsupported_column = %s", table.getName(), prestoValue),
+                    "VALUES '2'");
+            assertQuery(
+                    convertToVarchar,
+                    "DESC " + table.getName(),
+                    "VALUES " +
+                            "('key', 'varchar(5)', '', ''), " +
+                            "('unsupported_column', 'varchar', '', '')");
+            assertQueryFails(
+                    convertToVarchar,
+                    format("INSERT INTO %s (key, unsupported_column) VALUES (3, NULL)", table.getName()),
+                    "Insert query has mismatched column types: Table: \\[varchar\\(5\\), varchar\\], Query: \\[integer, unknown\\]");
+            assertQueryFails(
+                    convertToVarchar,
+                    format("INSERT INTO %s (key, unsupported_column) VALUES (4, %s)", table.getName(), prestoValue),
+                    "Insert query has mismatched column types: Table: \\[varchar\\(5\\), varchar\\], Query: \\[integer, varchar\\(50\\)\\]");
+            assertUpdate(
+                    convertToVarchar,
+                    format("INSERT INTO %s (key) VALUES '5'", table.getName()),
+                    1);
+            assertQuery(
+                    convertToVarchar,
+                    "SELECT * FROM " + table.getName(),
+                    format("VALUES ('1', NULL), ('2', %s), ('5', NULL)", prestoValue));
         }
+    }
+
+    private Session withUnsupportedType(UnsupportedTypeHandling unsupportedTypeHandling)
+    {
+        return Session.builder(getSession())
+                .setCatalogSessionProperty("postgresql", UNSUPPORTED_TYPE_HANDLING, unsupportedTypeHandling.name())
+                .build();
     }
 
     public static DataType<ZonedDateTime> prestoTimestampWithTimeZoneDataType()
@@ -891,15 +1289,41 @@ public class TestPostgreSqlTypeMapping
         return dataType(
                 "hstore",
                 getQueryRunner().getMetadata().getType(mapType(VARCHAR.getTypeSignature(), VARCHAR.getTypeSignature())),
-                value -> value.entrySet().stream()
-                        .flatMap(entry -> Stream.of(entry.getKey(), entry.getValue()))
-                        .map(string -> {
-                            if (string == null) {
-                                return "null";
-                            }
-                            return DataType.formatStringLiteral(string);
-                        })
-                        .collect(joining(",", "hstore(ARRAY[", "]::varchar[])")),
+                TestPostgreSqlTypeMapping::hstoreLiteral,
+                identity());
+    }
+
+    private static String hstoreLiteral(Map<String, String> value)
+    {
+        return value.entrySet().stream()
+                .flatMap(entry -> Stream.of(entry.getKey(), entry.getValue()))
+                .map(input -> (input == null) ? "null" : formatStringLiteral(input))
+                .collect(joining(",", "hstore(ARRAY[", "]::varchar[])"));
+    }
+
+    private DataType<Map<String, String>> varcharMapDataType()
+    {
+        return dataType(
+                "hstore",
+                getQueryRunner().getMetadata().getType(mapType(VARCHAR.getTypeSignature(), VARCHAR.getTypeSignature())),
+                value -> {
+                    List<String> formatted = value.entrySet().stream()
+                            .flatMap(entry -> Stream.of(entry.getKey(), entry.getValue()))
+                            .map(string -> {
+                                if (string == null) {
+                                    return "null";
+                                }
+                                return DataType.formatStringLiteral(string);
+                            })
+                            .collect(toImmutableList());
+                    ImmutableList.Builder<String> keys = ImmutableList.builder();
+                    ImmutableList.Builder<String> values = ImmutableList.builder();
+                    for (int i = 0; i < formatted.size(); i = i + 2) {
+                        keys.add(formatted.get(i));
+                        values.add(formatted.get(i + 1));
+                    }
+                    return String.format("MAP(ARRAY[%s], ARRAY[%s])", Joiner.on(',').join(keys.build()), Joiner.on(',').join(values.build()));
+                },
                 identity());
     }
 
@@ -928,6 +1352,23 @@ public class TestPostgreSqlTypeMapping
                 .build();
     }
 
+    private Session sessionWithDecimalMappingAllowOverflow(RoundingMode roundingMode, int scale)
+    {
+        return Session.builder(getQueryRunner().getDefaultSession())
+                .setCatalogSessionProperty("postgresql", DECIMAL_MAPPING, ALLOW_OVERFLOW.name())
+                .setCatalogSessionProperty("postgresql", DECIMAL_ROUNDING_MODE, roundingMode.name())
+                .setCatalogSessionProperty("postgresql", DECIMAL_DEFAULT_SCALE, Integer.valueOf(scale).toString())
+                .build();
+    }
+
+    private Session sessionWithDecimalMappingStrict(UnsupportedTypeHandling unsupportedTypeHandling)
+    {
+        return Session.builder(getQueryRunner().getDefaultSession())
+                .setCatalogSessionProperty("postgresql", DECIMAL_MAPPING, STRICT.name())
+                .setCatalogSessionProperty("postgresql", UNSUPPORTED_TYPE_HANDLING, unsupportedTypeHandling.name())
+                .build();
+    }
+
     private DataSetup prestoCreateAsSelect(String tableNamePrefix)
     {
         return new CreateAsSelectDataSetup(new PrestoSqlExecutor(getQueryRunner()), tableNamePrefix);
@@ -941,6 +1382,11 @@ public class TestPostgreSqlTypeMapping
     private DataSetup postgresCreateAndInsert(String tableNamePrefix)
     {
         return new CreateAndInsertDataSetup(new JdbcSqlExecutor(postgreSqlServer.getJdbcUrl()), tableNamePrefix);
+    }
+
+    private DataSetup postgresCreatePrestoInsert(String tableNamePrefix)
+    {
+        return new CreateAndPrestoInsertDataSetup(new JdbcSqlExecutor(postgreSqlServer.getJdbcUrl()), new PrestoSqlExecutor(getQueryRunner()), tableNamePrefix);
     }
 
     private static void checkIsGap(ZoneId zone, LocalDateTime dateTime)

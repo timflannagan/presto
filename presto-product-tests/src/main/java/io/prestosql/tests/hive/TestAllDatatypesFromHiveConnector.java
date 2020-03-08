@@ -49,6 +49,7 @@ import static io.prestosql.tests.hive.AllSimpleTypesTableDefinitions.ALL_HIVE_SI
 import static io.prestosql.tests.hive.AllSimpleTypesTableDefinitions.populateDataToHiveTable;
 import static io.prestosql.tests.utils.QueryExecutors.onHive;
 import static java.lang.String.format;
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.sql.JDBCType.BIGINT;
 import static java.sql.JDBCType.BOOLEAN;
 import static java.sql.JDBCType.CHAR;
@@ -148,7 +149,7 @@ public class TestAllDatatypesFromHiveConnector
                         "ala ma kot",
                         "ala ma    ",
                         true,
-                        "kot binarny".getBytes()));
+                        "kot binarny".getBytes(UTF_8)));
     }
 
     @Requires(OrcRequirements.class)
@@ -173,16 +174,13 @@ public class TestAllDatatypesFromHiveConnector
                         234.567,
                         new BigDecimal("346"),
                         new BigDecimal("345.67800"),
-                        getHiveVersionMajor() < 3
-                                ? Timestamp.valueOf(LocalDateTime.of(2015, 5, 10, 12, 15, 35, 123_000_000))
-                                // TODO (https://github.com/prestosql/presto/issues/1218)
-                                : Timestamp.valueOf(LocalDateTime.of(2015, 5, 10, 18, 0, 35, 123_000_000)),
+                        Timestamp.valueOf(LocalDateTime.of(2015, 5, 10, 12, 15, 35, 123_000_000)),
                         Date.valueOf("2015-05-10"),
                         "ala ma kota",
                         "ala ma kot",
                         "ala ma    ",
                         true,
-                        "kot binarny".getBytes()));
+                        "kot binarny".getBytes(UTF_8)));
     }
 
     @Requires(RcfileRequirements.class)
@@ -213,7 +211,7 @@ public class TestAllDatatypesFromHiveConnector
                         "ala ma kot",
                         "ala ma    ",
                         true,
-                        "kot binarny".getBytes()));
+                        "kot binarny".getBytes(UTF_8)));
     }
 
     @Requires(AvroRequirements.class)
@@ -287,7 +285,7 @@ public class TestAllDatatypesFromHiveConnector
                         "ala ma kot",
                         "ala ma    ",
                         true,
-                        "kot binarny".getBytes()));
+                        "kot binarny".getBytes(UTF_8)));
     }
 
     private void assertProperAllDatatypesSchema(String tableName)
@@ -408,7 +406,7 @@ public class TestAllDatatypesFromHiveConnector
                         "ala ma kot",
                         "ala ma    ",
                         true,
-                        "kot binarny".getBytes()));
+                        "kot binarny".getBytes(UTF_8)));
     }
 
     private static TableInstance<?> mutableTableInstanceOf(TableDefinition tableDefinition)

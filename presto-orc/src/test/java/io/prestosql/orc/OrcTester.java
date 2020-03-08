@@ -134,7 +134,6 @@ import static io.prestosql.spi.type.VarbinaryType.VARBINARY;
 import static io.prestosql.spi.type.Varchars.truncateToLength;
 import static io.prestosql.testing.DateTimeTestingUtils.sqlTimestampOf;
 import static io.prestosql.testing.TestingConnectorSession.SESSION;
-import static java.lang.Math.toIntExact;
 import static java.util.Arrays.asList;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static java.util.stream.Collectors.toList;
@@ -158,6 +157,7 @@ import static org.apache.hadoop.hive.serde2.objectinspector.primitive.PrimitiveO
 import static org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory.getCharTypeInfo;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertFalse;
+import static org.testng.Assert.assertNull;
 import static org.testng.Assert.assertTrue;
 
 public class OrcTester
@@ -319,7 +319,7 @@ public class OrcTester
     {
         Type mapType = mapType(type, type);
 
-        // maps can not have a null key, so select a value to use for the map key when the value is null
+        // maps cannot have a null key, so select a value to use for the map key when the value is null
         Object readNullKeyValue = Iterables.getLast(readValues);
 
         // values in simple map
@@ -457,7 +457,8 @@ public class OrcTester
             boolean isFirst = true;
             int rowsProcessed = 0;
             Iterator<?> iterator = expectedValues.iterator();
-            for (int batchSize = toIntExact(recordReader.nextBatch()); batchSize >= 0; batchSize = toIntExact(recordReader.nextBatch())) {
+            for (Page page = recordReader.nextPage(); page != null; page = recordReader.nextPage()) {
+                int batchSize = page.getPositionCount();
                 if (skipStripe && rowsProcessed < 10000) {
                     assertEquals(advance(iterator, batchSize), batchSize);
                 }
@@ -466,7 +467,7 @@ public class OrcTester
                     isFirst = false;
                 }
                 else {
-                    Block block = recordReader.readBlock(0);
+                    Block block = page.getBlock(0);
 
                     List<Object> data = new ArrayList<>(block.getPositionCount());
                     for (int position = 0; position < block.getPositionCount(); position++) {
@@ -485,6 +486,7 @@ public class OrcTester
                 rowsProcessed += batchSize;
             }
             assertFalse(iterator.hasNext());
+            assertNull(recordReader.nextPage());
 
             assertEquals(recordReader.getReaderPosition(), rowsProcessed);
             assertEquals(recordReader.getFilePosition(), rowsProcessed);
@@ -572,7 +574,14 @@ public class OrcTester
         assertEquals(orcReader.getColumnNames(), ImmutableList.of("test"));
         assertEquals(orcReader.getFooter().getRowsInRowGroup(), 10_000);
 
-        return orcReader.createRecordReader(ImmutableMap.of(0, type), predicate, HIVE_STORAGE_TIME_ZONE, newSimpleAggregatedMemoryContext(), initialBatchSize);
+        return orcReader.createRecordReader(
+                orcReader.getRootColumn().getNestedColumns(),
+                ImmutableList.of(type),
+                predicate,
+                HIVE_STORAGE_TIME_ZONE,
+                newSimpleAggregatedMemoryContext(),
+                initialBatchSize,
+                RuntimeException::new);
     }
 
     public static void writeOrcColumnPresto(File outputFile, CompressionKind compression, Type type, Iterator<?> values, OrcWriterStats stats)
@@ -831,10 +840,10 @@ public class OrcTester
             throws Exception
     {
         RecordWriter recordWriter = createOrcRecordWriter(outputFile, format, compression, type);
-        return writeOrcFileColumnHive(outputFile, format, recordWriter, type, values);
+        return writeOrcFileColumnHive(outputFile, recordWriter, type, values);
     }
 
-    public static DataSize writeOrcFileColumnHive(File outputFile, Format format, RecordWriter recordWriter, Type type, Iterator<?> values)
+    public static DataSize writeOrcFileColumnHive(File outputFile, RecordWriter recordWriter, Type type, Iterator<?> values)
             throws Exception
     {
         SettableStructObjectInspector objectInspector = createSettableStructObjectInspector("test", type);
@@ -967,7 +976,7 @@ public class OrcTester
             return date;
         }
         if (type.equals(TIMESTAMP)) {
-            long millisUtc = (int) ((SqlTimestamp) value).getMillisUtc();
+            long millisUtc = ((SqlTimestamp) value).getMillisUtc();
             return new Timestamp(millisUtc);
         }
         if (type instanceof DecimalType) {
@@ -1100,7 +1109,7 @@ public class OrcTester
         for (int i = 0; i < fieldTypes.length; i++) {
             String filedName = "field_" + i;
             Type fieldType = fieldTypes[i];
-            typeSignatureParameters.add(TypeSignatureParameter.namedTypeParameter(new NamedTypeSignature(Optional.of(new RowFieldName(filedName, false)), fieldType.getTypeSignature())));
+            typeSignatureParameters.add(TypeSignatureParameter.namedTypeParameter(new NamedTypeSignature(Optional.of(new RowFieldName(filedName)), fieldType.getTypeSignature())));
         }
         return METADATA.getParameterizedType(StandardTypes.ROW, typeSignatureParameters.build());
     }

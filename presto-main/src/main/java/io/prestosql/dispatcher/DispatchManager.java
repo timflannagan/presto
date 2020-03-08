@@ -80,7 +80,7 @@ public class DispatchManager
     public DispatchManager(
             QueryIdGenerator queryIdGenerator,
             QueryPreparer queryPreparer,
-            @SuppressWarnings("rawtypes") ResourceGroupManager resourceGroupManager,
+            ResourceGroupManager<?> resourceGroupManager,
             DispatchQueryFactory dispatchQueryFactory,
             FailedDispatchQueryFactory failedDispatchQueryFactory,
             TransactionManager transactionManager,
@@ -318,7 +318,7 @@ public class DispatchManager
         @Override
         public boolean cancel(boolean mayInterruptIfRunning)
         {
-            // query submission can not be canceled
+            // query submission cannot be canceled
             return false;
         }
     }

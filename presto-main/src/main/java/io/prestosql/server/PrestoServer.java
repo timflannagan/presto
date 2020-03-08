@@ -45,16 +45,16 @@ import io.prestosql.security.AccessControlModule;
 import io.prestosql.server.security.PasswordAuthenticatorManager;
 import io.prestosql.server.security.ServerSecurityModule;
 import io.prestosql.sql.parser.SqlParserOptions;
+import io.prestosql.version.EmbedVersion;
 import org.weakref.jmx.guice.MBeanModule;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Set;
 
+import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static io.airlift.discovery.client.ServiceAnnouncement.ServiceAnnouncementBuilder;
 import static io.airlift.discovery.client.ServiceAnnouncement.serviceAnnouncement;
 import static io.prestosql.server.PrestoSystemRequirements.verifyJvmRequirements;
@@ -67,7 +67,9 @@ public class PrestoServer
 {
     public static void main(String[] args)
     {
-        new PrestoServer().run();
+        // We use builtin version. This is used for system startup only.
+        EmbedVersion embedVersion = new EmbedVersion(new ServerConfig());
+        embedVersion.embedVersion(new PrestoServer()::run).run();
     }
 
     private final SqlParserOptions sqlParserOptions;
@@ -161,24 +163,11 @@ public class PrestoServer
         // get existing announcement
         ServiceAnnouncement announcement = getPrestoAnnouncement(announcer.getServiceAnnouncements());
 
-        Set<String> connectorIds = new LinkedHashSet<>();
-
         // automatically build connectorIds if not configured
-        List<Catalog> catalogs = metadata.getCatalogs();
-        // if this is a dedicated coordinator, only add jmx
-        if (serverConfig.isCoordinator() && !schedulerConfig.isIncludeCoordinator()) {
-            catalogs.stream()
-                    .map(Catalog::getConnectorCatalogName)
-                    .filter(connectorId -> connectorId.getCatalogName().equals("jmx"))
-                    .map(Object::toString)
-                    .forEach(connectorIds::add);
-        }
-        else {
-            catalogs.stream()
-                    .map(Catalog::getConnectorCatalogName)
-                    .map(Object::toString)
-                    .forEach(connectorIds::add);
-        }
+        Set<String> connectorIds = metadata.getCatalogs().stream()
+                .map(Catalog::getConnectorCatalogName)
+                .map(Object::toString)
+                .collect(toImmutableSet());
 
         // build announcement with updated sources
         ServiceAnnouncementBuilder builder = serviceAnnouncement(announcement.getType());

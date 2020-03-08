@@ -19,14 +19,14 @@ import io.airlift.log.Logging;
 import io.airlift.tpch.TpchTable;
 import io.prestosql.Session;
 import io.prestosql.plugin.tpch.TpchPlugin;
-import io.prestosql.tests.DistributedQueryRunner;
+import io.prestosql.testing.DistributedQueryRunner;
 
 import java.util.Map;
 
 import static io.airlift.testing.Closeables.closeAllSuppress;
 import static io.prestosql.plugin.tpch.TpchMetadata.TINY_SCHEMA_NAME;
+import static io.prestosql.testing.QueryAssertions.copyTpchTables;
 import static io.prestosql.testing.TestingSession.testSessionBuilder;
-import static io.prestosql.tests.QueryAssertions.copyTpchTables;
 
 public final class MemoryQueryRunner
 {
@@ -48,7 +48,10 @@ public final class MemoryQueryRunner
                 .setSchema("default")
                 .build();
 
-        DistributedQueryRunner queryRunner = new DistributedQueryRunner(session, 4, extraProperties);
+        DistributedQueryRunner queryRunner = DistributedQueryRunner.builder(session)
+                .setNodeCount(4)
+                .setExtraProperties(extraProperties)
+                .build();
 
         try {
             queryRunner.installPlugin(new MemoryPlugin());

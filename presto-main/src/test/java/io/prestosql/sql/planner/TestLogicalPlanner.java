@@ -72,6 +72,7 @@ import static io.prestosql.sql.planner.assertions.PlanMatchPattern.apply;
 import static io.prestosql.sql.planner.assertions.PlanMatchPattern.assignUniqueId;
 import static io.prestosql.sql.planner.assertions.PlanMatchPattern.constrainedTableScan;
 import static io.prestosql.sql.planner.assertions.PlanMatchPattern.constrainedTableScanWithTableLayout;
+import static io.prestosql.sql.planner.assertions.PlanMatchPattern.enforceSingleRow;
 import static io.prestosql.sql.planner.assertions.PlanMatchPattern.equiJoinClause;
 import static io.prestosql.sql.planner.assertions.PlanMatchPattern.exchange;
 import static io.prestosql.sql.planner.assertions.PlanMatchPattern.expression;
@@ -164,6 +165,48 @@ public class TestLogicalPlanner
                                                         ImmutableMap.of("partial_sum", functionCall("sum", ImmutableList.of("totalprice"))),
                                                         PARTIAL,
                                                         anyTree(tableScan("orders", ImmutableMap.of("totalprice", "totalprice")))))))));
+    }
+
+    @Test
+    public void testAllFieldsDereferenceOnSubquery()
+    {
+        assertPlan("SELECT (SELECT (min(regionkey), max(name)) FROM nation).*",
+                any(
+                        project(
+                                ImmutableMap.of(
+                                        "output_1", expression("CAST(\"row\" AS ROW(f0 bigint,f1 varchar(25))).f0"),
+                                        "output_2", expression("CAST(\"row\" AS ROW(f0 bigint,f1 varchar(25))).f1")),
+                                enforceSingleRow(
+                                        project(
+                                                ImmutableMap.of("row", expression("ROW(min, max)")),
+                                                aggregation(
+                                                        ImmutableMap.of(
+                                                                "min", functionCall("min", ImmutableList.of("min_regionkey")),
+                                                                "max", functionCall("max", ImmutableList.of("max_name"))),
+                                                        FINAL,
+                                                        any(
+                                                                aggregation(
+                                                                        ImmutableMap.of(
+                                                                                "min_regionkey", functionCall("min", ImmutableList.of("REGIONKEY")),
+                                                                                "max_name", functionCall("max", ImmutableList.of("NAME"))),
+                                                                        PARTIAL,
+                                                                        tableScan("nation", ImmutableMap.of("NAME", "name", "REGIONKEY", "regionkey"))))))))));
+    }
+
+    @Test
+    public void testAllFieldsDereferenceFromNonDeterministic()
+    {
+        assertPlan("SELECT (x, x).* FROM (SELECT rand()) T(x)",
+                any(
+                        project(
+                                ImmutableMap.of(
+                                        "output_1", expression("CAST(row AS ROW(f0 double,f1 double)).f0"),
+                                        "output_2", expression("CAST(row AS ROW(f0 double,f1 double)).f1")),
+                                project(
+                                        ImmutableMap.of("row", expression("ROW(\"rand\", \"rand\")")),
+                                        project(
+                                                ImmutableMap.of("rand", expression("rand()")),
+                                                values())))));
     }
 
     @Test
@@ -333,7 +376,7 @@ public class TestLogicalPlanner
                 anyTree(
                         join(LEFT, ImmutableList.of(equiJoinClause("NATION_NAME", "REGION_NAME"), equiJoinClause("NATION_REGIONKEY", "REGION_REGIONKEY")),
                                 anyTree(
-                                        filter("NATION_NAME = CAST ('blah' AS VARCHAR(25))",
+                                        filter("NATION_NAME = CAST ('blah' AS varchar(25))",
                                                 constrainedTableScan(
                                                         "nation",
                                                         ImmutableMap.of(),
@@ -341,7 +384,7 @@ public class TestLogicalPlanner
                                                                 "NATION_NAME", "name",
                                                                 "NATION_REGIONKEY", "regionkey")))),
                                 anyTree(
-                                        filter("REGION_NAME = CAST ('blah' AS VARCHAR(25))",
+                                        filter("REGION_NAME = CAST ('blah' AS varchar(25))",
                                                 constrainedTableScan(
                                                         "region",
                                                         ImmutableMap.of(),
@@ -862,10 +905,10 @@ public class TestLogicalPlanner
                 anyTree(
                         node(JoinNode.class,
                                 anyTree(
-                                    node(ValuesNode.class)),
+                                        node(ValuesNode.class)),
                                 anyTree(
                                         exchange(REMOTE, GATHER,
-                                                        node(TableScanNode.class))))));
+                                                node(TableScanNode.class))))));
 
         // replicated join is preserved if there are no equality criteria
         assertPlanWithSession(
@@ -1106,7 +1149,7 @@ public class TestLogicalPlanner
     {
         String query = "SELECT count(*) FROM orders ORDER BY 1";
         assertFalse(
-                searchFrom(plan(query, LogicalPlanner.Stage.OPTIMIZED).getRoot())
+                searchFrom(plan(query, OPTIMIZED).getRoot())
                         .where(isInstanceOfAny(SortNode.class))
                         .matches(),
                 format("Unexpected sort node for query: '%s'", query));
@@ -1124,7 +1167,7 @@ public class TestLogicalPlanner
     {
         String query = "SELECT count(*) FROM orders ORDER BY 1 LIMIT 10";
         assertFalse(
-                searchFrom(plan(query, LogicalPlanner.Stage.OPTIMIZED).getRoot())
+                searchFrom(plan(query, OPTIMIZED).getRoot())
                         .where(isInstanceOfAny(TopNNode.class, SortNode.class))
                         .matches(),
                 format("Unexpected TopN node for query: '%s'", query));
@@ -1155,7 +1198,7 @@ public class TestLogicalPlanner
     {
         String query = "SELECT distinct(c) FROM (SELECT count(*) as c FROM orders) LIMIT 10";
         assertFalse(
-                searchFrom(plan(query, LogicalPlanner.Stage.OPTIMIZED).getRoot())
+                searchFrom(plan(query, OPTIMIZED).getRoot())
                         .where(isInstanceOfAny(DistinctLimitNode.class))
                         .matches(),
                 format("Unexpected DistinctLimit node for query: '%s'", query));
@@ -1221,14 +1264,14 @@ public class TestLogicalPlanner
                 output(
                         anyTree(
                                 node(MarkDistinctNode.class,
-                                anyTree(
-                                        node(MarkDistinctNode.class,
-                                                exchange(LOCAL, REPARTITION,
-                                                        exchange(REMOTE, REPARTITION,
-                                                                project(ImmutableMap.of("hash_custkey", expression("combine_hash(bigint '0', COALESCE(\"$operator$hash_code\"(custkey), 0))"), "hash_nationkey", expression("combine_hash(bigint '0', COALESCE(\"$operator$hash_code\"(nationkey), 0))")),
-                                                                        tableScan("customer", ImmutableMap.of("custkey", "custkey", "nationkey", "nationkey")))),
-                                                        exchange(REMOTE, REPARTITION,
-                                                                node(ProjectNode.class,
-                                                                        node(TableScanNode.class))))))))));
+                                        anyTree(
+                                                node(MarkDistinctNode.class,
+                                                        exchange(LOCAL, REPARTITION,
+                                                                exchange(REMOTE, REPARTITION,
+                                                                        project(ImmutableMap.of("hash_custkey", expression("combine_hash(bigint '0', COALESCE(\"$operator$hash_code\"(custkey), 0))"), "hash_nationkey", expression("combine_hash(bigint '0', COALESCE(\"$operator$hash_code\"(nationkey), 0))")),
+                                                                                tableScan("customer", ImmutableMap.of("custkey", "custkey", "nationkey", "nationkey")))),
+                                                                exchange(REMOTE, REPARTITION,
+                                                                        node(ProjectNode.class,
+                                                                                node(TableScanNode.class))))))))));
     }
 }

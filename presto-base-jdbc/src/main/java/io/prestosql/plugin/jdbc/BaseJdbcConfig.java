@@ -16,6 +16,7 @@ package io.prestosql.plugin.jdbc;
 import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableSet;
 import io.airlift.configuration.Config;
+import io.airlift.configuration.ConfigDescription;
 import io.airlift.units.Duration;
 import io.airlift.units.MinDuration;
 
@@ -32,6 +33,8 @@ public class BaseJdbcConfig
     private boolean caseInsensitiveNameMatching;
     private Duration caseInsensitiveNameMatchingCacheTtl = new Duration(1, MINUTES);
     private Set<String> jdbcTypesMappedToVarchar = ImmutableSet.of();
+    private Duration metadataCacheTtl = new Duration(0, MINUTES);
+    private boolean cacheMissing;
 
     @NotNull
     public String getConnectionUrl()
@@ -81,6 +84,34 @@ public class BaseJdbcConfig
     public BaseJdbcConfig setJdbcTypesMappedToVarchar(String jdbcTypesMappedToVarchar)
     {
         this.jdbcTypesMappedToVarchar = ImmutableSet.copyOf(Splitter.on(",").omitEmptyStrings().trimResults().split(nullToEmpty(jdbcTypesMappedToVarchar)));
+        return this;
+    }
+
+    @NotNull
+    @MinDuration("0ms")
+    public Duration getMetadataCacheTtl()
+    {
+        return metadataCacheTtl;
+    }
+
+    @Config("metadata.cache-ttl")
+    @ConfigDescription("Determines how long meta information will be cached")
+    public BaseJdbcConfig setMetadataCacheTtl(Duration metadataCacheTtl)
+    {
+        this.metadataCacheTtl = metadataCacheTtl;
+        return this;
+    }
+
+    public boolean isCacheMissing()
+    {
+        return cacheMissing;
+    }
+
+    @Config("metadata.cache-missing")
+    @ConfigDescription("Determines if missing information will be cached")
+    public BaseJdbcConfig setCacheMissing(boolean cacheMissing)
+    {
+        this.cacheMissing = cacheMissing;
         return this;
     }
 }

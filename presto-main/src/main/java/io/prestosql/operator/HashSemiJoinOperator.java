@@ -15,7 +15,6 @@ package io.prestosql.operator;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.util.concurrent.ListenableFuture;
-import io.prestosql.Session;
 import io.prestosql.memory.context.AggregatedMemoryContext;
 import io.prestosql.memory.context.LocalMemoryContext;
 import io.prestosql.memory.context.MemoryTrackingContext;
@@ -91,9 +90,9 @@ public class HashSemiJoinOperator
         }
 
         @Override
-        public AdapterWorkProcessorOperator create(Session session, MemoryTrackingContext memoryTrackingContext, DriverYieldSignal yieldSignal)
+        public AdapterWorkProcessorOperator create(ProcessorContext processorContext)
         {
-            return new HashSemiJoinOperator(Optional.empty(), setSupplier, probeJoinChannel, probeJoinHashChannel, memoryTrackingContext);
+            return new HashSemiJoinOperator(Optional.empty(), setSupplier, probeJoinChannel, probeJoinHashChannel, processorContext.getMemoryTrackingContext());
         }
 
         @Override
@@ -115,9 +114,9 @@ public class HashSemiJoinOperator
         }
 
         @Override
-        public WorkProcessorOperator create(Session session, MemoryTrackingContext memoryTrackingContext, DriverYieldSignal yieldSignal, WorkProcessor<Page> sourcePages)
+        public WorkProcessorOperator create(ProcessorContext processorContext, WorkProcessor<Page> sourcePages)
         {
-            return new HashSemiJoinOperator(Optional.of(sourcePages), setSupplier, probeJoinChannel, probeJoinHashChannel, memoryTrackingContext);
+            return new HashSemiJoinOperator(Optional.of(sourcePages), setSupplier, probeJoinChannel, probeJoinHashChannel, processorContext.getMemoryTrackingContext());
         }
     }
 
@@ -169,7 +168,7 @@ public class HashSemiJoinOperator
     {
     }
 
-    private class SemiJoinPages
+    private static class SemiJoinPages
             implements WorkProcessor.Transformation<Page, Page>
     {
         private final int probeJoinChannel;

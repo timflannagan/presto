@@ -5,12 +5,12 @@
     <parent>
         <groupId>io.airlift</groupId>
         <artifactId>airbase</artifactId>
-        <version>92</version>
+        <version>93</version>
     </parent>
 
     <groupId>io.prestosql</groupId>
     <artifactId>presto-root</artifactId>
-    <version>322</version>
+    <version>328</version>
     <packaging>pom</packaging>
 
     <name>presto-root</name>
@@ -30,7 +30,7 @@
     <scm>
         <connection>scm:git:git://github.com/prestosql/presto.git</connection>
         <url>https://github.com/prestosql/presto</url>
-        <tag>322</tag>
+        <tag>328</tag>
     </scm>
 
     <properties>
@@ -44,7 +44,7 @@
         <air.maven.version>3.3.9</air.maven.version>
 
         <dep.antlr.version>4.7.1</dep.antlr.version>
-        <dep.airlift.version>0.184</dep.airlift.version>
+        <dep.airlift.version>0.189</dep.airlift.version>
         <dep.packaging.version>${dep.airlift.version}</dep.packaging.version>
         <dep.slice.version>0.36</dep.slice.version>
         <dep.aws-sdk.version>1.11.602</dep.aws-sdk.version>
@@ -52,12 +52,16 @@
         <dep.jdbi3.version>3.4.0</dep.jdbi3.version>
         <dep.drift.version>1.14</dep.drift.version>
         <dep.joda.version>2.10.3</dep.joda.version>
-        <dep.tempto.version>166</dep.tempto.version>
+        <dep.tempto.version>170</dep.tempto.version>
         <dep.testng.version>6.10</dep.testng.version>
         <dep.assertj-core.version>3.8.0</dep.assertj-core.version>
-        <dep.logback.version>1.2.3</dep.logback.version>
+        <!-- TODO: remove after updating to Airbase 94 -->
+        <dep.slf4j.version>1.7.29</dep.slf4j.version>
         <dep.jmxutils.version>1.21</dep.jmxutils.version>
+        <dep.cglib.version>3.3.0</dep.cglib.version>
+        <dep.javax-servlet.version>4.0.1</dep.javax-servlet.version>
         <dep.gcs.version>2.0.0</dep.gcs.version>
+        <dep.errorprone.version>2.3.3</dep.errorprone.version>
 
         <!--
           America/Bahia_Banderas has:
@@ -100,6 +104,7 @@
         <module>presto-raptor-legacy</module>
         <module>presto-base-jdbc</module>
         <module>presto-mysql</module>
+        <module>presto-memsql</module>
         <module>presto-phoenix</module>
         <module>presto-postgresql</module>
         <module>presto-redshift</module>
@@ -112,6 +117,7 @@
         <module>presto-geospatial</module>
         <module>presto-geospatial-toolkit</module>
         <module>presto-benchmark</module>
+        <module>presto-testing</module>
         <module>presto-testing-docker</module>
         <module>presto-tests</module>
         <module>presto-product-tests</module>
@@ -398,6 +404,12 @@
 
             <dependency>
                 <groupId>io.prestosql</groupId>
+                <artifactId>presto-testing</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>io.prestosql</groupId>
                 <artifactId>presto-testing-docker</artifactId>
                 <version>${project.version}</version>
             </dependency>
@@ -435,13 +447,13 @@
             <dependency>
                 <groupId>io.prestosql.hadoop</groupId>
                 <artifactId>hadoop-apache</artifactId>
-                <version>3.2.0-4</version>
+                <version>3.2.0-5</version>
             </dependency>
 
             <dependency>
                 <groupId>io.prestosql.hive</groupId>
                 <artifactId>hive-apache</artifactId>
-                <version>3.0.0-3</version>
+                <version>3.0.0-4</version>
             </dependency>
 
             <dependency>
@@ -713,13 +725,13 @@
             <dependency>
                 <groupId>org.jetbrains</groupId>
                 <artifactId>annotations</artifactId>
-                <version>13.0</version>
+                <version>18.0.0</version>
             </dependency>
 
             <dependency>
                 <groupId>it.unimi.dsi</groupId>
                 <artifactId>fastutil</artifactId>
-                <version>6.5.9</version>
+                <version>8.3.0</version>
             </dependency>
 
             <dependency>
@@ -841,6 +853,30 @@
             </dependency>
 
             <dependency>
+                <groupId>org.alluxio</groupId>
+                <artifactId>alluxio-shaded-client</artifactId>
+                <version>2.0.1</version>
+                <exclusions>
+                    <exclusion>
+                        <groupId>org.slf4j</groupId>
+                        <artifactId>slf4j-api</artifactId>
+                    </exclusion>
+                    <exclusion>
+                        <groupId>org.slf4j</groupId>
+                        <artifactId>slf4j-log4j12</artifactId>
+                    </exclusion>
+                    <exclusion>
+                        <groupId>log4j</groupId>
+                        <artifactId>log4j</artifactId>
+                    </exclusion>
+                    <exclusion>
+                        <groupId>commons-logging</groupId>
+                        <artifactId>commons-logging</artifactId>
+                    </exclusion>
+                </exclusions>
+            </dependency>
+
+            <dependency>
                 <groupId>com.amazonaws</groupId>
                 <artifactId>aws-java-sdk-core</artifactId>
                 <version>${dep.aws-sdk.version}</version>
@@ -890,7 +926,7 @@
 
             <dependency>
                 <groupId>com.amazonaws</groupId>
-                    <artifactId>aws-java-sdk-kinesis</artifactId>
+                <artifactId>aws-java-sdk-kinesis</artifactId>
                 <version>${dep.aws-sdk.version}</version>
                 <exclusions>
                     <exclusion>
@@ -988,8 +1024,8 @@
                 <version>hadoop2-${dep.gcs.version}</version>
                 <exclusions>
                     <exclusion>
-                        <artifactId>log4j</artifactId>
                         <groupId>log4j</groupId>
+                        <artifactId>log4j</artifactId>
                     </exclusion>
                     <exclusion>
                         <groupId>org.slf4j</groupId>
@@ -1016,12 +1052,12 @@
                 <version>3.4.13</version>
                 <exclusions>
                     <exclusion>
-                        <artifactId>jline</artifactId>
                         <groupId>jline</groupId>
+                        <artifactId>jline</artifactId>
                     </exclusion>
                     <exclusion>
-                        <artifactId>log4j</artifactId>
                         <groupId>log4j</groupId>
+                        <artifactId>log4j</artifactId>
                     </exclusion>
                     <exclusion>
                         <groupId>org.slf4j</groupId>
@@ -1126,12 +1162,6 @@
                 <groupId>org.apache.lucene</groupId>
                 <artifactId>lucene-analyzers-common</artifactId>
                 <version>7.2.1</version>
-                <exclusions>
-                    <exclusion>
-                        <groupId>org.apache.lucene</groupId>
-                        <artifactId>lucene-core</artifactId>
-                    </exclusion>
-                </exclusions>
             </dependency>
 
             <dependency>
@@ -1162,18 +1192,6 @@
 
             <dependency>
                 <groupId>io.prestosql.cassandra</groupId>
-                <artifactId>cassandra-server</artifactId>
-                <version>2.1.16-2</version>
-                <exclusions>
-                    <exclusion>
-                        <groupId>io.netty</groupId>
-                        <artifactId>netty-all</artifactId>
-                    </exclusion>
-                </exclusions>
-            </dependency>
-
-            <dependency>
-                <groupId>io.prestosql.cassandra</groupId>
                 <artifactId>cassandra-driver</artifactId>
                 <version>3.1.4-2</version>
             </dependency>
@@ -1190,6 +1208,13 @@
                 <version>2.0.1</version>
             </dependency>
 
+            <!-- TODO: remove after updating to Airbase 94 -->
+            <dependency>
+                <groupId>javax.annotation</groupId>
+                <artifactId>javax.annotation-api</artifactId>
+                <version>1.3.2</version>
+            </dependency>
+
             <!-- force newer version to be used for dependencies -->
             <dependency>
                 <groupId>org.javassist</groupId>
@@ -1200,13 +1225,21 @@
             <dependency>
                 <groupId>com.google.errorprone</groupId>
                 <artifactId>error_prone_annotations</artifactId>
-                <version>2.3.3</version>
+                <version>${dep.errorprone.version}</version>
             </dependency>
 
             <dependency>
                 <groupId>org.checkerframework</groupId>
                 <artifactId>checker-qual</artifactId>
                 <version>2.8.2</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>testcontainers-bom</artifactId>
+                <version>1.12.4</version>
+                <type>pom</type>
+                <scope>import</scope>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -1385,6 +1418,46 @@
                                 </goals>
                             </execution>
                         </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <profile>
+            <id>errorprone-compiler-presto</id><!-- airbase defines "errorprone-compiler" profile but set up this ourselves -->
+
+            <!-- TODO simplify the following configuration when using JDK 9+ for compilation. See https://errorprone.info/docs/installation -->
+            <properties>
+                <javac.version>9+181-r4173-1</javac.version>
+
+                <!-- with errorprone compiler, checkstyle is run on generated sources too and they may not match our checkstyle rules -->
+                <air.check.skip-checkstyle>true</air.check.skip-checkstyle>
+            </properties>
+
+            <!-- using github.com/google/error-prone-javac is required when running on JDK 8 -->
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-compiler-plugin</artifactId>
+                        <version>3.8.0</version>
+                        <!--suppress MavenModelInspection -->
+                        <configuration combine.children="merge">
+                            <fork>true</fork>
+                            <compilerArgs>
+                                <arg>-J-Xbootclasspath/p:${settings.localRepository}/com/google/errorprone/javac/${javac.version}/javac-${javac.version}.jar</arg>
+                                <arg>-XDcompilePolicy=simple</arg>
+                                <!-- TODO enable more checks, i.e. remove "-XepDisableAllChecks" -->
+                                <arg>-Xplugin:ErrorProne -XepExcludedPaths:.*/target/generated-(|test-)sources/.* -XepDisableAllChecks -Xep:MissingOverride:ERROR -Xep:ClassCanBeStatic:ERROR -Xep:ArrayToString:ERROR</arg>
+                            </compilerArgs>
+                            <annotationProcessorPaths>
+                                <path>
+                                    <groupId>com.google.errorprone</groupId>
+                                    <artifactId>error_prone_core</artifactId>
+                                    <version>${dep.errorprone.version}</version>
+                                </path>
+                            </annotationProcessorPaths>
+                        </configuration>
                     </plugin>
                 </plugins>
             </build>

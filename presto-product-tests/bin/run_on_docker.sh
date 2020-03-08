@@ -1,10 +1,13 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -euo pipefail
 
 source "${BASH_SOURCE%/*}/lib.sh"
 
 function retry() {
+  local END
+  local EXIT_CODE
+
   END=$(($(date +%s) + 600))
 
   while (( $(date +%s) < $END )); do
@@ -28,8 +31,12 @@ function hadoop_master_container(){
 
 function check_hadoop() {
   HADOOP_MASTER_CONTAINER=$(hadoop_master_container)
-  docker exec ${HADOOP_MASTER_CONTAINER} supervisorctl status hive-server2 | grep -iq running && \
-    docker exec ${HADOOP_MASTER_CONTAINER} netstat -lpn | grep -iq 0.0.0.0:10000
+  docker exec ${HADOOP_MASTER_CONTAINER} supervisorctl status hive-server2 | grep -i running &> /dev/null && \
+    docker exec ${HADOOP_MASTER_CONTAINER} netstat -lpn | grep -i 0.0.0.0:10000 &> /dev/null
+}
+
+function check_any_container_is_up() {
+  environment_compose ps -q | grep .
 }
 
 function run_in_application_runner_container() {
@@ -41,20 +48,19 @@ function run_in_application_runner_container() {
 }
 
 function check_presto() {
-  run_in_application_runner_container /docker/volumes/conf/docker/files/presto-cli.sh --execute "SHOW CATALOGS" | grep -iq hive
+  run_in_application_runner_container /docker/presto-product-tests/conf/docker/files/presto-cli.sh --execute "SHOW CATALOGS" | grep -i hive &> /dev/null
 }
 
 function run_product_tests() {
   local REPORT_DIR="${PRODUCT_TESTS_ROOT}/target/test-reports"
-  rm -rf "${REPORT_DIR}"
   mkdir -p "${REPORT_DIR}"
-  run_in_application_runner_container /docker/volumes/conf/docker/files/run-tempto.sh "$@" &
+  run_in_application_runner_container /docker/presto-product-tests/conf/docker/files/run-tempto.sh "$@" &
   PRODUCT_TESTS_PROCESS_ID=$!
   wait ${PRODUCT_TESTS_PROCESS_ID}
   local PRODUCT_TESTS_EXIT_CODE=$?
 
   #make the files in $REPORT_DIR modifiable by everyone, as they were created by root (by docker)
-  run_in_application_runner_container chmod -R 777 "/docker/volumes/test-reports"
+  run_in_application_runner_container chmod -R 777 "/docker/test-reports"
 
   return ${PRODUCT_TESTS_EXIT_CODE}
 }
@@ -93,7 +99,6 @@ fi
 docker-compose version
 docker version
 
-stop_all_containers
 remove_empty_property_files
 
 if [[ ${CONTINUOUS_INTEGRATION:-false} = true ]]; then
@@ -108,6 +113,10 @@ environment_compose config
 SERVICES=$(environment_compose config --services | grep -vx 'application-runner\|.*-base')
 environment_compose up --no-color --abort-on-container-exit ${SERVICES} &
 
+# Wait for `environment_compose up` to create docker network *without* creating any new containers.
+# Otherwise docker-compose may created network twice and subsequently fail.
+retry check_any_container_is_up
+
 # wait until hadoop processes are started
 retry check_hadoop
 
@@ -115,10 +124,11 @@ retry check_hadoop
 retry check_presto
 
 # run product tests
-set +e
+set +e -x
 run_product_tests "$@"
 EXIT_CODE=$?
 set -e
+echo "Product tests exited with ${EXIT_CODE}"
 
 # execution finished successfully
 # disable trap, run cleanup manually

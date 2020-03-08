@@ -38,6 +38,7 @@ import io.prestosql.dispatcher.DispatchQueryFactory;
 import io.prestosql.dispatcher.DispatcherConfig;
 import io.prestosql.dispatcher.FailedDispatchQueryFactory;
 import io.prestosql.dispatcher.LocalDispatchQueryFactory;
+import io.prestosql.dispatcher.QueuedStatementResource;
 import io.prestosql.event.QueryMonitor;
 import io.prestosql.event.QueryMonitorConfig;
 import io.prestosql.execution.AddColumnTask;
@@ -72,6 +73,7 @@ import io.prestosql.execution.RemoteTaskFactory;
 import io.prestosql.execution.RenameColumnTask;
 import io.prestosql.execution.RenameSchemaTask;
 import io.prestosql.execution.RenameTableTask;
+import io.prestosql.execution.RenameViewTask;
 import io.prestosql.execution.ResetSessionTask;
 import io.prestosql.execution.RevokeRolesTask;
 import io.prestosql.execution.RevokeTask;
@@ -102,6 +104,7 @@ import io.prestosql.memory.TotalReservationLowMemoryKiller;
 import io.prestosql.memory.TotalReservationOnBlockedNodesLowMemoryKiller;
 import io.prestosql.metadata.CatalogManager;
 import io.prestosql.operator.ForScheduler;
+import io.prestosql.server.protocol.ExecutingStatementResource;
 import io.prestosql.server.remotetask.RemoteTaskStats;
 import io.prestosql.spi.memory.ClusterMemoryPoolManager;
 import io.prestosql.spi.resourcegroups.QueryType;
@@ -129,6 +132,7 @@ import io.prestosql.sql.tree.Prepare;
 import io.prestosql.sql.tree.RenameColumn;
 import io.prestosql.sql.tree.RenameSchema;
 import io.prestosql.sql.tree.RenameTable;
+import io.prestosql.sql.tree.RenameView;
 import io.prestosql.sql.tree.ResetSession;
 import io.prestosql.sql.tree.Revoke;
 import io.prestosql.sql.tree.RevokeRoles;
@@ -194,8 +198,8 @@ public class CoordinatorModule
         jsonCodecBinder(binder).bindJsonCodec(QueryResults.class);
         jsonCodecBinder(binder).bindJsonCodec(SelectedRole.class);
         configBinder(binder).bindConfig(DispatcherConfig.class);
-        jaxrsBinder(binder).bind(io.prestosql.dispatcher.QueuedStatementResource.class);
-        jaxrsBinder(binder).bind(io.prestosql.server.protocol.ExecutingStatementResource.class);
+        jaxrsBinder(binder).bind(QueuedStatementResource.class);
+        jaxrsBinder(binder).bind(ExecutingStatementResource.class);
         binder.bind(StatementHttpExecutionMBean.class).in(Scopes.SINGLETON);
         newExporter(binder).export(StatementHttpExecutionMBean.class).withGeneratedName();
 
@@ -215,7 +219,6 @@ public class CoordinatorModule
 
         // query manager
         jaxrsBinder(binder).bind(QueryResource.class);
-        jaxrsBinder(binder).bind(StageResource.class);
         jaxrsBinder(binder).bind(QueryStateInfoResource.class);
         jaxrsBinder(binder).bind(ResourceGroupStateInfoResource.class);
         binder.bind(QueryIdGenerator.class).in(Scopes.SINGLETON);
@@ -276,6 +279,7 @@ public class CoordinatorModule
         binder.bind(ExplainAnalyzeContext.class).in(Scopes.SINGLETON);
 
         // execution scheduler
+        jsonCodecBinder(binder).bindJsonCodec(TaskUpdateRequest.class);
         binder.bind(RemoteTaskFactory.class).to(HttpRemoteTaskFactory.class).in(Scopes.SINGLETON);
         newExporter(binder).export(RemoteTaskFactory.class).withGeneratedName();
 
@@ -323,6 +327,7 @@ public class CoordinatorModule
         bindDataDefinitionTask(binder, executionBinder, DropColumn.class, DropColumnTask.class);
         bindDataDefinitionTask(binder, executionBinder, DropTable.class, DropTableTask.class);
         bindDataDefinitionTask(binder, executionBinder, CreateView.class, CreateViewTask.class);
+        bindDataDefinitionTask(binder, executionBinder, RenameView.class, RenameViewTask.class);
         bindDataDefinitionTask(binder, executionBinder, DropView.class, DropViewTask.class);
         bindDataDefinitionTask(binder, executionBinder, Use.class, UseTask.class);
         bindDataDefinitionTask(binder, executionBinder, SetSession.class, SetSessionTask.class);
@@ -429,11 +434,11 @@ public class CoordinatorModule
         executionBinder.addBinding(statement).to(DataDefinitionExecutionFactory.class).in(Scopes.SINGLETON);
     }
 
-    private void bindLowMemoryKiller(String name, Class<? extends LowMemoryKiller> clazz)
+    private void bindLowMemoryKiller(LowMemoryKillerPolicy policy, Class<? extends LowMemoryKiller> clazz)
     {
         install(installModuleIf(
                 MemoryManagerConfig.class,
-                config -> name.equals(config.getLowMemoryKillerPolicy()),
+                config -> policy == config.getLowMemoryKillerPolicy(),
                 binder -> binder.bind(LowMemoryKiller.class).to(clazz).in(Scopes.SINGLETON)));
     }
 

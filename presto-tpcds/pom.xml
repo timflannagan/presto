@@ -4,7 +4,7 @@
     <parent>
         <groupId>io.prestosql</groupId>
         <artifactId>presto-root</artifactId>
-        <version>322</version>
+        <version>328</version>
     </parent>
 
     <artifactId>presto-tpcds</artifactId>
@@ -69,7 +69,7 @@
         <!-- for testing -->
         <dependency>
             <groupId>io.prestosql</groupId>
-            <artifactId>presto-tests</artifactId>
+            <artifactId>presto-testing</artifactId>
             <scope>test</scope>
         </dependency>
 

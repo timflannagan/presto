@@ -75,6 +75,7 @@ import io.prestosql.sql.tree.Relation;
 import io.prestosql.sql.tree.RenameColumn;
 import io.prestosql.sql.tree.RenameSchema;
 import io.prestosql.sql.tree.RenameTable;
+import io.prestosql.sql.tree.RenameView;
 import io.prestosql.sql.tree.ResetSession;
 import io.prestosql.sql.tree.Revoke;
 import io.prestosql.sql.tree.RevokeRoles;
@@ -135,6 +136,13 @@ public final class SqlFormatter
         StringBuilder builder = new StringBuilder();
         new Formatter(builder).process(root, 0);
         return builder.toString();
+    }
+
+    static String formatName(QualifiedName name)
+    {
+        return name.getOriginalParts().stream()
+                .map(ExpressionFormatter::formatExpression)
+                .collect(joining("."));
     }
 
     private static class Formatter
@@ -596,6 +604,17 @@ public final class SqlFormatter
         }
 
         @Override
+        protected Void visitRenameView(RenameView node, Integer context)
+        {
+            builder.append("ALTER VIEW ")
+                    .append(node.getSource())
+                    .append(" RENAME TO ")
+                    .append(node.getTarget());
+
+            return null;
+        }
+
+        @Override
         protected Void visitDropView(DropView node, Integer context)
         {
             builder.append("DROP VIEW ");
@@ -649,6 +668,10 @@ public final class SqlFormatter
 
             node.getLikePattern().ifPresent((value) ->
                     builder.append(" LIKE ")
+                            .append(formatStringLiteral(value)));
+
+            node.getEscape().ifPresent((value) ->
+                    builder.append(" ESCAPE ")
                             .append(formatStringLiteral(value)));
 
             return null;
@@ -733,6 +756,14 @@ public final class SqlFormatter
         {
             builder.append("SHOW FUNCTIONS");
 
+            node.getLikePattern().ifPresent((value) ->
+                    builder.append(" LIKE ")
+                            .append(formatStringLiteral(value)));
+
+            node.getEscape().ifPresent((value) ->
+                    builder.append(" ESCAPE ")
+                            .append(formatStringLiteral(value)));
+
             return null;
         }
 
@@ -740,6 +771,14 @@ public final class SqlFormatter
         protected Void visitShowSession(ShowSession node, Integer context)
         {
             builder.append("SHOW SESSION");
+
+            node.getLikePattern().ifPresent((value) ->
+                    builder.append(" LIKE ")
+                            .append(formatStringLiteral(value)));
+
+            node.getEscape().ifPresent((value) ->
+                    builder.append(" ESCAPE ")
+                            .append(formatStringLiteral(value)));
 
             return null;
         }
@@ -901,19 +940,6 @@ public final class SqlFormatter
                     .collect(joining(", "));
 
             return " WITH ( " + propertyList + " )";
-        }
-
-        private static String formatName(Identifier name)
-        {
-            String delimiter = name.isDelimited() ? "\"" : "";
-            return delimiter + name.getValue().replace("\"", "\"\"") + delimiter;
-        }
-
-        private static String formatName(QualifiedName name)
-        {
-            return name.getOriginalParts().stream()
-                    .map(Formatter::formatName)
-                    .collect(joining("."));
         }
 
         private String formatColumnDefinition(ColumnDefinition column)

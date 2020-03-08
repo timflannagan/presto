@@ -14,7 +14,7 @@
 package io.prestosql.plugin.redis;
 
 import io.prestosql.plugin.redis.util.EmbeddedRedis;
-import io.prestosql.tests.AbstractTestIntegrationSmokeTest;
+import io.prestosql.testing.AbstractTestIntegrationSmokeTest;
 import org.testng.annotations.AfterClass;
 import org.testng.annotations.Test;
 
@@ -44,5 +44,17 @@ public class TestRedisIntegrationSmokeTest
     public void destroy()
     {
         embeddedRedis.close();
+    }
+
+    @Override
+    protected boolean canCreateSchema()
+    {
+        return false;
+    }
+
+    @Override
+    protected boolean canDropSchema()
+    {
+        return false;
     }
 }

@@ -120,6 +120,14 @@ where profile is one of either:
  While running tests on ``singlenode-sqlserver`` make sure to exclude
  `mysql` and `postgresql` tests i.e.
  `-x mysql, postgresql`.
+- **two-mixed-hives** - two pseudo-distributed Hadoop installations running on
+ a single Docker containers. One Hadoop (Hive) installations is kerberized.
+ A single node installation of kerberized Presto also
+ running on a single Docker container.
+- **two-kerberos-hives** - two pseudo-distributed Hadoop installations running on
+ a single Docker containers. Both Hadoop (Hive) installations are kerberized.
+ A single node installation of kerberized Presto also
+ running on a single Docker container.
 
 ### Hadoop docker image used for testing
 The default Hadoop/Hive docker image used for testing is defined in `conf/common/compose-commons.sh` and can be controlled
@@ -232,7 +240,7 @@ To run with custom versions of presto / presto-cli / product tests, just set the
 environment variables:
 
 ```
-export PRESTO_SERVER_DIR=/tmp/presto-server-dir      #unpacked presto-server.tar.gz
+export PRESTO_SERVER=/tmp/presto-server.tgz
 export PRESTO_CLI_JAR=/tmp/artifacts/presto-cli-executable.jar
 export PRODUCT_TESTS_JAR=/tmp/artifacts/presto-product-tests-executable.jar
 export PRESTO_JDBC_DRIVER_JAR=libs/PrestoJDBC42.jar
@@ -245,7 +253,7 @@ and then set environment variable like below. Your configuration file will be lo
 it is able to override any configuration entry.
 
 ```
-export TEMPTO_EXTRA_CONFIG_FILE=/docker/volumes/conf/EXTRA_TEMPTO_CONFIG.yml
+export TEMPTO_EXTRA_CONFIG_FILE=/docker/presto-product-tests/conf/EXTRA_TEMPTO_CONFIG.yml
 ```
 
 All of the variables are optional and fall back to local sources / build artifacts if unspecified.

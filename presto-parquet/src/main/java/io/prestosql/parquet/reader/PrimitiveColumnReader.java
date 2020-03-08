@@ -31,7 +31,6 @@ import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntList;
 import org.apache.parquet.bytes.ByteBufferInputStream;
 import org.apache.parquet.bytes.BytesUtils;
-import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.values.ValuesReader;
 import org.apache.parquet.column.values.rle.RunLengthBitPackingHybridDecoder;
 import org.apache.parquet.io.ParquetDecodingException;
@@ -83,7 +82,7 @@ public abstract class PrimitiveColumnReader
 
     public static PrimitiveColumnReader createReader(RichColumnDescriptor descriptor)
     {
-        switch (descriptor.getType()) {
+        switch (descriptor.getPrimitiveType().getPrimitiveTypeName()) {
             case BOOLEAN:
                 return new BooleanColumnReader(descriptor);
             case INT32:
@@ -105,7 +104,7 @@ public abstract class PrimitiveColumnReader
                 return createDecimalColumnReader(descriptor)
                         .orElseThrow(() -> new PrestoException(NOT_SUPPORTED, " type FIXED_LEN_BYTE_ARRAY supported as DECIMAL; got " + descriptor.getPrimitiveType().getOriginalType()));
             default:
-                throw new PrestoException(NOT_SUPPORTED, "Unsupported parquet type: " + descriptor.getType());
+                throw new PrestoException(NOT_SUPPORTED, "Unsupported parquet type: " + descriptor.getPrimitiveType().getPrimitiveTypeName());
         }
     }
 
@@ -154,11 +153,6 @@ public abstract class PrimitiveColumnReader
     {
         readOffset = readOffset + nextBatchSize;
         nextBatchSize = batchSize;
-    }
-
-    public ColumnDescriptor getDescriptor()
-    {
-        return columnDescriptor;
     }
 
     public ColumnChunk readPrimitive(Field field)

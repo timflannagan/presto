@@ -13,7 +13,6 @@
  */
 package io.prestosql.metadata;
 
-import com.google.common.collect.Multimap;
 import io.airlift.slice.Slice;
 import io.prestosql.Session;
 import io.prestosql.connector.CatalogName;
@@ -28,7 +27,6 @@ import io.prestosql.spi.connector.ColumnHandle;
 import io.prestosql.spi.connector.ColumnMetadata;
 import io.prestosql.spi.connector.ConnectorCapabilities;
 import io.prestosql.spi.connector.ConnectorOutputMetadata;
-import io.prestosql.spi.connector.ConnectorTableHandle;
 import io.prestosql.spi.connector.ConnectorTableMetadata;
 import io.prestosql.spi.connector.ConnectorViewDefinition;
 import io.prestosql.spi.connector.Constraint;
@@ -123,7 +121,7 @@ public interface Metadata
     List<QualifiedObjectName> listTables(Session session, QualifiedTablePrefix prefix);
 
     /**
-     * Gets all of the columns on the specified table, or an empty map if the columns can not be enumerated.
+     * Gets all of the columns on the specified table, or an empty map if the columns cannot be enumerated.
      *
      * @throws RuntimeException if table handle is no longer valid
      */
@@ -191,7 +189,7 @@ public interface Metadata
     /**
      * Drops the specified table
      *
-     * @throws RuntimeException if the table can not be dropped or table handle is no longer valid
+     * @throws RuntimeException if the table cannot be dropped or table handle is no longer valid
      */
     void dropTable(Session session, TableHandle tableHandle);
 
@@ -228,11 +226,6 @@ public interface Metadata
      * Finish statistics collection
      */
     void finishStatisticsCollection(Session session, AnalyzeTableHandle tableHandle, Collection<ComputedStatistics> computedStatistics);
-
-    /**
-     * Start a SELECT/UPDATE/INSERT/DELETE query
-     */
-    void beginQuery(Session session, Multimap<CatalogName, ConnectorTableHandle> connectors);
 
     /**
      * Cleanup after a query. This is the very last notification after the query finishes, regardless if it succeeds or fails.
@@ -311,6 +304,11 @@ public interface Metadata
      * Creates the specified view with the specified view definition.
      */
     void createView(Session session, QualifiedObjectName viewName, ConnectorViewDefinition definition, boolean replace);
+
+    /**
+     * Rename the specified view.
+     */
+    void renameView(Session session, QualifiedObjectName existingViewName, QualifiedObjectName newViewName);
 
     /**
      * Drops the specified view.
@@ -425,7 +423,7 @@ public interface Metadata
 
     void addFunctions(List<? extends SqlFunction> functions);
 
-    List<SqlFunction> listFunctions();
+    List<FunctionMetadata> listFunctions();
 
     FunctionInvokerProvider getFunctionInvokerProvider();
 
@@ -448,6 +446,10 @@ public interface Metadata
      * because overloads between aggregation and other function types are not allowed.
      */
     boolean isAggregationFunction(QualifiedName name);
+
+    FunctionMetadata getFunctionMetadata(ResolvedFunction resolvedFunction);
+
+    AggregationFunctionMetadata getAggregationFunctionMetadata(ResolvedFunction resolvedFunction);
 
     WindowFunctionSupplier getWindowFunctionImplementation(ResolvedFunction resolvedFunction);
 

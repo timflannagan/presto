@@ -38,6 +38,7 @@ import java.util.Optional;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
+import static io.prestosql.sql.analyzer.TypeSignatureTranslator.toSqlType;
 import static java.util.Objects.requireNonNull;
 
 /**
@@ -207,9 +208,7 @@ class TranslationMap
                     Symbol symbol = lambdaDeclarationToSymbolMap.get(NodeRef.of(referencedLambdaArgumentDeclaration));
                     return coerceIfNecessary(node, symbol.toSymbolReference());
                 }
-                else {
-                    return rewriteExpressionWithResolvedName(node);
-                }
+                return rewriteExpressionWithResolvedName(node);
             }
 
             private Expression rewriteExpressionWithResolvedName(Expression node)
@@ -283,7 +282,7 @@ class TranslationMap
                 if (coercion != null) {
                     rewritten = new Cast(
                             rewritten,
-                            coercion.getTypeSignature().toString(),
+                            toSqlType(coercion),
                             false,
                             analysis.isTypeOnlyCoercion(original));
                 }

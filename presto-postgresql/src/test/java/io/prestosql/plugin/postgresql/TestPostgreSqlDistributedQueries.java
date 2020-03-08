@@ -15,7 +15,8 @@ package io.prestosql.plugin.postgresql;
 
 import com.google.common.collect.ImmutableMap;
 import io.airlift.tpch.TpchTable;
-import io.prestosql.tests.AbstractTestDistributedQueries;
+import io.prestosql.testing.AbstractTestDistributedQueries;
+import io.prestosql.testing.QueryRunner;
 import org.testng.annotations.AfterClass;
 import org.testng.annotations.Test;
 
@@ -25,17 +26,21 @@ import static io.prestosql.plugin.postgresql.PostgreSqlQueryRunner.createPostgre
 public class TestPostgreSqlDistributedQueries
         extends AbstractTestDistributedQueries
 {
-    private final TestingPostgreSqlServer postgreSqlServer;
+    private TestingPostgreSqlServer postgreSqlServer;
 
-    public TestPostgreSqlDistributedQueries()
+    @Override
+    protected QueryRunner createQueryRunner()
+            throws Exception
     {
-        this(new TestingPostgreSqlServer());
-    }
-
-    public TestPostgreSqlDistributedQueries(TestingPostgreSqlServer postgreSqlServer)
-    {
-        super(() -> createPostgreSqlQueryRunner(postgreSqlServer, ImmutableMap.of(), TpchTable.getTables()));
-        this.postgreSqlServer = postgreSqlServer;
+        this.postgreSqlServer = new TestingPostgreSqlServer();
+        return createPostgreSqlQueryRunner(
+                postgreSqlServer,
+                ImmutableMap.<String, String>builder()
+                        // caching here speeds up tests highly, caching is not used in smoke tests
+                        .put("metadata.cache-ttl", "10m")
+                        .put("metadata.cache-missing", "true")
+                        .build(),
+                TpchTable.getTables());
     }
 
     @AfterClass(alwaysRun = true)

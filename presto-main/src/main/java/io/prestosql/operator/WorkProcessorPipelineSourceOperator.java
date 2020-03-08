@@ -19,6 +19,7 @@ import com.google.common.util.concurrent.SettableFuture;
 import io.airlift.log.Logger;
 import io.airlift.units.DataSize;
 import io.airlift.units.Duration;
+import io.prestosql.execution.Lifespan;
 import io.prestosql.memory.context.AggregatedMemoryContext;
 import io.prestosql.memory.context.LocalMemoryContext;
 import io.prestosql.memory.context.MemoryTrackingContext;
@@ -143,9 +144,7 @@ public class WorkProcessorPipelineSourceOperator
             MemoryTrackingContext operatorMemoryTrackingContext = createMemoryTrackingContext(operatorContext, operatorIndex);
             operatorMemoryTrackingContext.initializeLocalMemoryContexts(operatorFactory.getOperatorType());
             WorkProcessorOperator operator = operatorFactory.create(
-                    operatorContext.getSession(),
-                    operatorMemoryTrackingContext,
-                    operatorContext.getDriverContext().getYieldSignal(),
+                    new ProcessorContext(operatorContext.getSession(), operatorMemoryTrackingContext, operatorContext),
                     pages);
             workProcessorOperatorContexts.add(new WorkProcessorOperatorContext(
                     operator,
@@ -241,12 +240,14 @@ public class WorkProcessorPipelineSourceOperator
         }
 
         // account processed bytes from lazy blocks only when they are loaded
-        return recordMaterializedBytes(page, sizeInBytes -> {
+        recordMaterializedBytes(page, sizeInBytes -> {
             operatorContext.outputDataSize.getAndAdd(sizeInBytes);
             if (downstreamOperatorContext != null) {
                 downstreamOperatorContext.inputDataSize.getAndAdd(sizeInBytes);
             }
         });
+
+        return page;
     }
 
     private boolean isLastOperator(int operatorIndex)
@@ -712,7 +713,14 @@ public class WorkProcessorPipelineSourceOperator
         @Override
         public void noMoreOperators()
         {
+            this.operatorFactories.forEach(WorkProcessorOperatorFactory::close);
             closed = true;
+        }
+
+        @Override
+        public void noMoreOperators(Lifespan lifespan)
+        {
+            this.operatorFactories.forEach(operatorFactory -> operatorFactory.lifespanFinished(lifespan));
         }
     }
 }

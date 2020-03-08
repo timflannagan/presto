@@ -58,10 +58,7 @@ public class PageSourceManager
         CatalogName catalogName = split.getCatalogName();
 
         ConnectorPageSourceProvider provider = getPageSourceProvider(catalogName);
-        TupleDomain<ColumnHandle> constraint = TupleDomain.all();
-        if (dynamicFilter != null) {
-            constraint = dynamicFilter.get(); // should not block
-        }
+        TupleDomain<ColumnHandle> constraint = dynamicFilter.get();
         if (constraint.isAll()) {
             return provider.createPageSource(
                     table.getTransaction(),
@@ -70,18 +67,16 @@ public class PageSourceManager
                     table.getConnectorHandle(),
                     columns);
         }
-        else if (constraint.isNone()) {
+        if (constraint.isNone()) {
             return new FixedPageSource(ImmutableList.of());
         }
-        else {
-            return provider.createPageSource(
-                    table.getTransaction(),
-                    session.toConnectorSession(catalogName),
-                    split.getConnectorSplit(),
-                    table.getConnectorHandle(),
-                    columns,
-                    constraint);
-        }
+        return provider.createPageSource(
+                table.getTransaction(),
+                session.toConnectorSession(catalogName),
+                split.getConnectorSplit(),
+                table.getConnectorHandle(),
+                columns,
+                constraint);
     }
 
     private ConnectorPageSourceProvider getPageSourceProvider(CatalogName catalogName)

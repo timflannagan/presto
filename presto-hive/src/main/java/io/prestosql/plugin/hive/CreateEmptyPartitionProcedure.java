@@ -60,7 +60,7 @@ public class CreateEmptyPartitionProcedure
             List.class);
 
     private final Supplier<TransactionalMetadata> hiveMetadataFactory;
-    private final HiveMetastore metastore;
+    private final HiveMetastoreClosure metastore;
     private final LocationService locationService;
     private final JsonCodec<PartitionUpdate> partitionUpdateJsonCodec;
 
@@ -68,7 +68,7 @@ public class CreateEmptyPartitionProcedure
     public CreateEmptyPartitionProcedure(Supplier<TransactionalMetadata> hiveMetadataFactory, HiveMetastore metastore, LocationService locationService, JsonCodec<PartitionUpdate> partitionUpdateCodec)
     {
         this.hiveMetadataFactory = requireNonNull(hiveMetadataFactory, "hiveMetadataFactory is null");
-        this.metastore = requireNonNull(metastore, "metastore is null");
+        this.metastore = new HiveMetastoreClosure(requireNonNull(metastore, "metastore is null"));
         this.locationService = requireNonNull(locationService, "locationService is null");
         this.partitionUpdateJsonCodec = requireNonNull(partitionUpdateCodec, "partitionUpdateCodec is null");
     }
@@ -94,11 +94,11 @@ public class CreateEmptyPartitionProcedure
         }
     }
 
-    private void doCreateEmptyPartition(ConnectorSession session, String schema, String table, List<Object> partitionColumnNames, List<Object> partitionValues)
+    private void doCreateEmptyPartition(ConnectorSession session, String schemaName, String tableName, List<Object> partitionColumnNames, List<Object> partitionValues)
     {
         TransactionalMetadata hiveMetadata = hiveMetadataFactory.get();
 
-        ConnectorTableHandle tableHandle = hiveMetadata.getTableHandle(session, new SchemaTableName(schema, table));
+        ConnectorTableHandle tableHandle = hiveMetadata.getTableHandle(session, new SchemaTableName(schemaName, tableName));
         HiveInsertTableHandle hiveInsertTableHandle = (HiveInsertTableHandle) hiveMetadata.beginInsert(session, tableHandle);
 
         List<String> actualPartitionColumnNames = hiveInsertTableHandle.getInputColumns().stream()
@@ -113,7 +113,7 @@ public class CreateEmptyPartitionProcedure
                 .map(String.class::cast)
                 .collect(toImmutableList());
 
-        if (metastore.getPartition(new HiveIdentity(session), schema, table, partitionStringValues).isPresent()) {
+        if (metastore.getPartition(new HiveIdentity(session), schemaName, tableName, partitionStringValues).isPresent()) {
             throw new PrestoException(ALREADY_EXISTS, "Partition already exists");
         }
         String partitionName = FileUtils.makePartName(actualPartitionColumnNames, partitionStringValues);

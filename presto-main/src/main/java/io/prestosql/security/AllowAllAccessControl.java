@@ -21,7 +21,6 @@ import io.prestosql.spi.connector.SchemaTableName;
 import io.prestosql.spi.security.Identity;
 import io.prestosql.spi.security.PrestoPrincipal;
 import io.prestosql.spi.security.Privilege;
-import io.prestosql.transaction.TransactionId;
 
 import java.security.Principal;
 import java.util.List;
@@ -40,11 +39,6 @@ public class AllowAllAccessControl
     public Set<String> filterCatalogs(Identity identity, Set<String> catalogs)
     {
         return catalogs;
-    }
-
-    @Override
-    public void checkCanAccessCatalog(Identity identity, String catalogName)
-    {
     }
 
     @Override
@@ -146,6 +140,11 @@ public class AllowAllAccessControl
     }
 
     @Override
+    public void checkCanRenameView(SecurityContext context, QualifiedObjectName viewName, QualifiedObjectName newViewName)
+    {
+    }
+
+    @Override
     public void checkCanDropView(SecurityContext context, QualifiedObjectName viewName)
     {
     }
@@ -171,7 +170,7 @@ public class AllowAllAccessControl
     }
 
     @Override
-    public void checkCanSetCatalogSessionProperty(TransactionId transactionId, Identity identity, String catalogName, String propertyName)
+    public void checkCanSetCatalogSessionProperty(SecurityContext context, String catalogName, String propertyName)
     {
     }
 
@@ -201,7 +200,7 @@ public class AllowAllAccessControl
     }
 
     @Override
-    public void checkCanSetRole(TransactionId transactionId, Identity identity, String role, String catalogName)
+    public void checkCanSetRole(SecurityContext context, String role, String catalogName)
     {
     }
 

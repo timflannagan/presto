@@ -45,6 +45,7 @@ import javax.inject.Inject;
 import javax.inject.Singleton;
 
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -55,6 +56,7 @@ import static io.airlift.json.JsonBinder.jsonBinder;
 import static io.airlift.json.JsonCodecBinder.jsonCodecBinder;
 import static java.util.Objects.requireNonNull;
 import static java.util.concurrent.Executors.newCachedThreadPool;
+import static java.util.concurrent.Executors.newScheduledThreadPool;
 import static org.weakref.jmx.guice.ExportBinder.newExporter;
 
 public class HiveModule
@@ -86,10 +88,6 @@ public class HiveModule
         binder.bind(CachingDirectoryLister.class).in(Scopes.SINGLETON);
         newExporter(binder).export(CachingDirectoryLister.class).withGeneratedName();
 
-        Multibinder<HiveRecordCursorProvider> recordCursorProviderBinder = newSetBinder(binder, HiveRecordCursorProvider.class);
-        recordCursorProviderBinder.addBinding().to(S3SelectRecordCursorProvider.class).in(Scopes.SINGLETON);
-        recordCursorProviderBinder.addBinding().to(GenericHiveRecordCursorProvider.class).in(Scopes.SINGLETON);
-
         binder.bind(HiveWriterStats.class).in(Scopes.SINGLETON);
         newExporter(binder).export(HiveWriterStats.class).withGeneratedName();
 
@@ -115,6 +113,11 @@ public class HiveModule
         pageSourceFactoryBinder.addBinding().to(ParquetPageSourceFactory.class).in(Scopes.SINGLETON);
         pageSourceFactoryBinder.addBinding().to(RcFilePageSourceFactory.class).in(Scopes.SINGLETON);
 
+        Multibinder<HiveRecordCursorProvider> recordCursorProviderBinder = newSetBinder(binder, HiveRecordCursorProvider.class);
+        recordCursorProviderBinder.addBinding().to(S3SelectRecordCursorProvider.class).in(Scopes.SINGLETON);
+
+        binder.bind(GenericHiveRecordCursorProvider.class).in(Scopes.SINGLETON);
+
         Multibinder<HiveFileWriterFactory> fileWriterFactoryBinder = newSetBinder(binder, HiveFileWriterFactory.class);
         binder.bind(OrcFileWriterFactory.class).in(Scopes.SINGLETON);
         newExporter(binder).export(OrcFileWriterFactory.class).withGeneratedName();
@@ -135,6 +138,16 @@ public class HiveModule
     public ExecutorService createHiveClientExecutor(HiveCatalogName catalogName)
     {
         return newCachedThreadPool(daemonThreadsNamed("hive-" + catalogName + "-%s"));
+    }
+
+    @ForHiveTransactionHeartbeats
+    @Singleton
+    @Provides
+    public ScheduledExecutorService createHiveTransactionHeartbeatExecutor(HiveCatalogName catalogName, HiveConfig hiveConfig)
+    {
+        return newScheduledThreadPool(
+                hiveConfig.getHiveTransactionHeartbeatThreads(),
+                daemonThreadsNamed("hive-heartbeat-" + catalogName + "-%s"));
     }
 
     @Singleton

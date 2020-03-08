@@ -13,7 +13,10 @@
  */
 package io.prestosql.plugin.phoenix;
 
-import io.prestosql.tests.AbstractTestIntegrationSmokeTest;
+import io.prestosql.Session;
+import io.prestosql.plugin.jdbc.UnsupportedTypeHandling;
+import io.prestosql.testing.AbstractTestIntegrationSmokeTest;
+import org.testng.SkipException;
 import org.testng.annotations.AfterClass;
 import org.testng.annotations.Test;
 
@@ -22,11 +25,12 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
 
+import static io.prestosql.plugin.jdbc.TypeHandlingJdbcPropertiesProvider.UNSUPPORTED_TYPE_HANDLING;
+import static io.prestosql.plugin.jdbc.UnsupportedTypeHandling.CONVERT_TO_VARCHAR;
 import static io.prestosql.plugin.phoenix.PhoenixQueryRunner.createPhoenixQueryRunner;
 import static org.testng.Assert.assertTrue;
 import static org.testng.Assert.fail;
 
-@Test
 public class TestPhoenixIntegrationSmokeTest
         extends AbstractTestIntegrationSmokeTest
 {
@@ -73,6 +77,36 @@ public class TestPhoenixIntegrationSmokeTest
     }
 
     @Test
+    public void testUnsupportedType()
+            throws Exception
+    {
+        executeInPhoenix("CREATE TABLE tpch.test_timestamp (pk bigint primary key, val1 timestamp)");
+        executeInPhoenix("UPSERT INTO tpch.test_timestamp (pk, val1) VALUES (1, null)");
+        executeInPhoenix("UPSERT INTO tpch.test_timestamp (pk, val1) VALUES (2, '2002-05-30T09:30:10.5')");
+        assertUpdate("INSERT INTO test_timestamp VALUES (3)", 1);
+        assertQuery("SELECT * FROM test_timestamp", "VALUES 1, 2, 3");
+        assertQuery(
+                withUnsupportedType(CONVERT_TO_VARCHAR),
+                "SELECT * FROM test_timestamp",
+                "VALUES " +
+                        "(1, null), " +
+                        "(2, '2002-05-30 09:30:10.500'), " +
+                        "(3, null)");
+        assertQueryFails(
+                withUnsupportedType(CONVERT_TO_VARCHAR),
+                "INSERT INTO test_timestamp VALUES (4, '2002-05-30 09:30:10.500')",
+                "Underlying type that is mapped to VARCHAR is not supported for INSERT: TIMESTAMP");
+        assertUpdate("DROP TABLE tpch.test_timestamp");
+    }
+
+    private Session withUnsupportedType(UnsupportedTypeHandling unsupportedTypeHandling)
+    {
+        return Session.builder(getSession())
+                .setCatalogSessionProperty("phoenix", UNSUPPORTED_TYPE_HANDLING, unsupportedTypeHandling.name())
+                .build();
+    }
+
+    @Test
     public void testCreateTableWithProperties()
     {
         assertUpdate("CREATE TABLE test_create_table_with_properties (created_date date, a bigint, b double, c varchar(10), d varchar(10)) WITH(rowkeys = 'created_date row_timestamp,a,b,c', salt_buckets=10)");
@@ -112,12 +146,25 @@ public class TestPhoenixIntegrationSmokeTest
         assertQuery("SELECT Val1 FROM testcaseinsensitive where Val1 < 1.2", "SELECT 1.1");
     }
 
+    @Override
+    public void testCreateSchema()
+    {
+        throw new SkipException("test disabled until issue fixed"); // TODO https://github.com/prestosql/presto/issues/2348
+    }
+
+    @Override
+    public void testDropSchema()
+    {
+        throw new SkipException("test disabled until issue fixed"); // TODO https://github.com/prestosql/presto/issues/2348
+    }
+
     private void executeInPhoenix(String sql)
             throws SQLException
     {
         try (Connection connection = DriverManager.getConnection(testingPhoenixServer.getJdbcUrl());
                 Statement statement = connection.createStatement()) {
             statement.execute(sql);
+            connection.commit();
         }
     }
 }

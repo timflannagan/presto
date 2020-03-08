@@ -109,11 +109,11 @@ import static io.prestosql.spi.type.VarcharType.createVarcharType;
 import static io.prestosql.spi.type.Varchars.isVarcharType;
 import static io.prestosql.testing.DateTimeTestingUtils.sqlTimestampOf;
 import static io.prestosql.testing.MaterializedResult.materializeSourceDataStream;
-import static io.prestosql.tests.StructuralTestUtil.arrayBlockOf;
-import static io.prestosql.tests.StructuralTestUtil.decimalArrayBlockOf;
-import static io.prestosql.tests.StructuralTestUtil.decimalMapBlockOf;
-import static io.prestosql.tests.StructuralTestUtil.mapBlockOf;
-import static io.prestosql.tests.StructuralTestUtil.rowBlockOf;
+import static io.prestosql.testing.StructuralTestUtil.arrayBlockOf;
+import static io.prestosql.testing.StructuralTestUtil.decimalArrayBlockOf;
+import static io.prestosql.testing.StructuralTestUtil.decimalMapBlockOf;
+import static io.prestosql.testing.StructuralTestUtil.mapBlockOf;
+import static io.prestosql.testing.StructuralTestUtil.rowBlockOf;
 import static java.lang.Float.intBitsToFloat;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Arrays.fill;
@@ -579,7 +579,7 @@ public abstract class AbstractTestHiveFileFormats
                 testColumns.stream()
                         .map(TestColumn::getType)
                         .collect(Collectors.joining(",")));
-        serializer.initialize(new Configuration(), tableProperties);
+        serializer.initialize(new Configuration(false), tableProperties);
 
         JobConf jobConf = new JobConf();
         configureCompression(jobConf, compressionCodec);
@@ -593,7 +593,7 @@ public abstract class AbstractTestHiveFileFormats
                 () -> {});
 
         try {
-            serializer.initialize(new Configuration(), tableProperties);
+            serializer.initialize(new Configuration(false), tableProperties);
 
             SettableStructObjectInspector objectInspector = getStandardStructObjectInspector(
                     testColumns.stream()
@@ -626,7 +626,7 @@ public abstract class AbstractTestHiveFileFormats
 
         // todo to test with compression, the file must be renamed with the compression extension
         Path path = new Path(filePath);
-        path.getFileSystem(new Configuration()).setVerifyChecksum(true);
+        path.getFileSystem(new Configuration(false)).setVerifyChecksum(true);
         File file = new File(filePath);
         return new FileSplit(path, 0, file.length(), new String[0]);
     }

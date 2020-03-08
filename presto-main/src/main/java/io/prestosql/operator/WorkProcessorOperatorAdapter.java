@@ -14,7 +14,6 @@
 package io.prestosql.operator;
 
 import com.google.common.util.concurrent.ListenableFuture;
-import io.prestosql.Session;
 import io.prestosql.memory.context.MemoryTrackingContext;
 import io.prestosql.spi.Page;
 
@@ -40,10 +39,7 @@ public class WorkProcessorOperatorAdapter
     public interface AdapterWorkProcessorOperatorFactory
             extends WorkProcessorOperatorFactory
     {
-        AdapterWorkProcessorOperator create(
-                Session session,
-                MemoryTrackingContext memoryTrackingContext,
-                DriverYieldSignal yieldSignal);
+        AdapterWorkProcessorOperator create(ProcessorContext processorContext);
     }
 
     public WorkProcessorOperatorAdapter(OperatorContext operatorContext, AdapterWorkProcessorOperatorFactory workProcessorOperatorFactory)
@@ -55,7 +51,7 @@ public class WorkProcessorOperatorAdapter
                 operatorContext.aggregateSystemMemoryContext());
         memoryTrackingContext.initializeLocalMemoryContexts(workProcessorOperatorFactory.getOperatorType());
         this.workProcessorOperator = requireNonNull(workProcessorOperatorFactory, "workProcessorOperatorFactory is null")
-                .create(operatorContext.getSession(), memoryTrackingContext, operatorContext.getDriverContext().getYieldSignal());
+                .create(new ProcessorContext(operatorContext.getSession(), memoryTrackingContext, operatorContext));
         this.pages = workProcessorOperator.getOutputPages();
         operatorContext.setInfoSupplier(() -> workProcessorOperator.getOperatorInfo().orElse(null));
     }

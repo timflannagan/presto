@@ -14,17 +14,16 @@
 package io.prestosql.plugin.geospatial;
 
 import io.prestosql.Session;
-import io.prestosql.plugin.hive.HivePlugin;
+import io.prestosql.plugin.hive.TestingHivePlugin;
 import io.prestosql.plugin.hive.authentication.HiveIdentity;
 import io.prestosql.plugin.hive.metastore.Database;
 import io.prestosql.plugin.hive.metastore.HiveMetastore;
 import io.prestosql.spi.security.PrincipalType;
-import io.prestosql.tests.AbstractTestQueryFramework;
-import io.prestosql.tests.DistributedQueryRunner;
+import io.prestosql.testing.AbstractTestQueryFramework;
+import io.prestosql.testing.DistributedQueryRunner;
 import org.testng.annotations.Test;
 
 import java.io.File;
-import java.util.Optional;
 
 import static io.prestosql.SystemSessionProperties.SPATIAL_PARTITIONING_TABLE_NAME;
 import static io.prestosql.plugin.hive.metastore.file.FileHiveMetastore.createTestingFileHiveMetastore;
@@ -56,19 +55,16 @@ public class TestSpatialJoins
             "(7.1, 7.2, 'z', 3), " +
             "(null, 1.2, 'null', 4)";
 
-    public TestSpatialJoins()
-    {
-        super(() -> createQueryRunner());
-    }
-
-    private static DistributedQueryRunner createQueryRunner()
+    @Override
+    protected DistributedQueryRunner createQueryRunner()
             throws Exception
     {
-        DistributedQueryRunner queryRunner = new DistributedQueryRunner(testSessionBuilder()
+        Session session = testSessionBuilder()
                 .setSource(TestSpatialJoins.class.getSimpleName())
                 .setCatalog("hive")
                 .setSchema("default")
-                .build(), 4);
+                .build();
+        DistributedQueryRunner queryRunner = DistributedQueryRunner.builder(session).build();
         queryRunner.installPlugin(new GeoPlugin());
 
         File baseDir = queryRunner.getCoordinator().getBaseDataDir().resolve("hive_data").toFile();
@@ -82,7 +78,7 @@ public class TestSpatialJoins
                         .setOwnerName("public")
                         .setOwnerType(PrincipalType.ROLE)
                         .build());
-        queryRunner.installPlugin(new HivePlugin("hive", Optional.of(metastore)));
+        queryRunner.installPlugin(new TestingHivePlugin(metastore));
 
         queryRunner.createCatalog("hive", "hive");
         return queryRunner;
@@ -299,7 +295,7 @@ public class TestSpatialJoins
                 "VALUES ('0_0', '0_1'), ('0_0', '1_1'), ('1_0', '0_1'), ('1_0', '1_1'), ('3_0', '3_1'), ('10_0', '10_1')");
 
         // radius expression
-        assertQuery(session, "SELECT a.name, b.name " + "FROM (VALUES (0, 0, '0_0'), (1, 0, '1_0'), (3, 0, '3_0'), (10, 0, '10_0')) as a (x, y, name), " +
+        assertQuery(session, "SELECT a.name, b.name FROM (VALUES (0, 0, '0_0'), (1, 0, '1_0'), (3, 0, '3_0'), (10, 0, '10_0')) as a (x, y, name), " +
                         "(VALUES (0, 1, '0_1'), (1, 1, '1_1'), (3, 1, '3_1'), (10, 1, '10_1')) as b (x, y, name) " +
                         "WHERE ST_Distance(ST_Point(a.x, a.y), ST_Point(b.x, b.y)) <= sqrt(b.x * b.x + b.y * b.y)",
                 "VALUES ('0_0', '0_1'), ('0_0', '1_1'), ('0_0', '3_1'), ('0_0', '10_1'), ('1_0', '1_1'), ('1_0', '3_1'), ('1_0', '10_1'), ('3_0', '3_1'), ('3_0', '10_1'), ('10_0', '10_1')");

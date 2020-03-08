@@ -40,11 +40,11 @@ import java.util.regex.Pattern;
 
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Suppliers.memoizeWithExpiration;
-import static io.prestosql.plugin.base.JsonUtils.parseJson;
 import static io.prestosql.plugin.base.security.CatalogAccessControlRule.AccessMode.ALL;
 import static io.prestosql.plugin.base.security.CatalogAccessControlRule.AccessMode.READ_ONLY;
 import static io.prestosql.plugin.base.security.FileBasedAccessControlConfig.SECURITY_CONFIG_FILE;
 import static io.prestosql.plugin.base.security.FileBasedAccessControlConfig.SECURITY_REFRESH_PERIOD;
+import static io.prestosql.plugin.base.util.JsonUtils.parseJson;
 import static io.prestosql.spi.StandardErrorCode.CONFIGURATION_INVALID;
 import static io.prestosql.spi.security.AccessDeniedException.denyAddColumn;
 import static io.prestosql.spi.security.AccessDeniedException.denyCatalogAccess;
@@ -63,6 +63,7 @@ import static io.prestosql.spi.security.AccessDeniedException.denyInsertTable;
 import static io.prestosql.spi.security.AccessDeniedException.denyRenameColumn;
 import static io.prestosql.spi.security.AccessDeniedException.denyRenameSchema;
 import static io.prestosql.spi.security.AccessDeniedException.denyRenameTable;
+import static io.prestosql.spi.security.AccessDeniedException.denyRenameView;
 import static io.prestosql.spi.security.AccessDeniedException.denyRevokeTablePrivilege;
 import static io.prestosql.spi.security.AccessDeniedException.denySetUser;
 import static java.lang.String.format;
@@ -365,6 +366,14 @@ public class FileBasedSystemAccessControl
     {
         if (!canAccessCatalog(context.getIdentity(), view.getCatalogName(), ALL)) {
             denyCreateView(view.toString());
+        }
+    }
+
+    @Override
+    public void checkCanRenameView(SystemSecurityContext context, CatalogSchemaTableName view, CatalogSchemaTableName newView)
+    {
+        if (!canAccessCatalog(context.getIdentity(), view.getCatalogName(), ALL)) {
+            denyRenameView(view.toString(), newView.toString());
         }
     }
 

@@ -51,6 +51,7 @@ import java.util.OptionalInt;
 import java.util.Properties;
 import java.util.stream.Stream;
 
+import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.common.io.MoreFiles.deleteRecursively;
 import static com.google.common.io.RecursiveDeleteOption.ALLOW_INSECURE;
@@ -64,8 +65,7 @@ import static io.prestosql.plugin.hive.HiveTestUtils.PAGE_SORTER;
 import static io.prestosql.plugin.hive.HiveTestUtils.TYPE_MANAGER;
 import static io.prestosql.plugin.hive.HiveTestUtils.getDefaultHiveFileWriterFactories;
 import static io.prestosql.plugin.hive.HiveTestUtils.getDefaultHivePageSourceFactories;
-import static io.prestosql.plugin.hive.HiveTestUtils.getDefaultHiveRecordCursorProvider;
-import static io.prestosql.plugin.hive.HiveTestUtils.getDefaultOrcFileWriterFactory;
+import static io.prestosql.plugin.hive.HiveTestUtils.getDefaultHiveRecordCursorProviders;
 import static io.prestosql.plugin.hive.HiveTestUtils.getHiveSession;
 import static io.prestosql.plugin.hive.HiveTestUtils.getHiveSessionProperties;
 import static io.prestosql.plugin.hive.HiveType.HIVE_DATE;
@@ -81,6 +81,7 @@ import static io.prestosql.spi.type.DoubleType.DOUBLE;
 import static io.prestosql.spi.type.IntegerType.INTEGER;
 import static io.prestosql.spi.type.VarcharType.createUnboundedVarcharType;
 import static io.prestosql.testing.assertions.Assert.assertEquals;
+import static java.lang.Math.round;
 import static java.lang.String.format;
 import static java.util.stream.Collectors.toList;
 import static org.apache.hadoop.hive.metastore.api.hive_metastoreConstants.FILE_INPUT_FORMAT;
@@ -197,7 +198,7 @@ public class TestHivePageSink
         MaterializedResult expectedResults = toMaterializedResult(getHiveSession(config), columnTypes, ImmutableList.of(page));
         MaterializedResult results = toMaterializedResult(getHiveSession(config), columnTypes, pages);
         assertEquals(results, expectedResults);
-        assertEquals(stats.getInputPageSizeInBytes().getAllTime().getMax(), page.getRetainedSizeInBytes());
+        assertEquals(round(stats.getInputPageSizeInBytes().getAllTime().getMax()), page.getRetainedSizeInBytes());
         return length;
     }
 
@@ -216,8 +217,8 @@ public class TestHivePageSink
         Properties splitProperties = new Properties();
         splitProperties.setProperty(FILE_INPUT_FORMAT, config.getHiveStorageFormat().getInputFormat());
         splitProperties.setProperty(SERIALIZATION_LIB, config.getHiveStorageFormat().getSerDe());
-        splitProperties.setProperty("columns", Joiner.on(',').join(getColumnHandles().stream().map(HiveColumnHandle::getName).collect(toList())));
-        splitProperties.setProperty("columns.types", Joiner.on(',').join(getColumnHandles().stream().map(HiveColumnHandle::getHiveType).map(hiveType -> hiveType.getHiveTypeName().toString()).collect(toList())));
+        splitProperties.setProperty("columns", Joiner.on(',').join(getColumnHandles().stream().map(HiveColumnHandle::getName).collect(toImmutableList())));
+        splitProperties.setProperty("columns.types", Joiner.on(',').join(getColumnHandles().stream().map(HiveColumnHandle::getHiveType).map(hiveType -> hiveType.getHiveTypeName().toString()).collect(toImmutableList())));
         HiveSplit split = new HiveSplit(
                 SCHEMA_NAME,
                 TABLE_NAME,
@@ -237,11 +238,12 @@ public class TestHivePageSink
                 false);
         ConnectorTableHandle table = new HiveTableHandle(SCHEMA_NAME, TABLE_NAME, ImmutableMap.of(), ImmutableList.of(), Optional.empty());
         HivePageSourceProvider provider = new HivePageSourceProvider(
+                TYPE_MANAGER,
                 config,
                 HDFS_ENVIRONMENT,
-                getDefaultHiveRecordCursorProvider(config, HDFS_ENVIRONMENT),
-                getDefaultHivePageSourceFactories(config, HDFS_ENVIRONMENT),
-                TYPE_MANAGER);
+                getDefaultHivePageSourceFactories(HDFS_ENVIRONMENT),
+                getDefaultHiveRecordCursorProviders(config, HDFS_ENVIRONMENT),
+                new GenericHiveRecordCursorProvider(HDFS_ENVIRONMENT, config));
         return provider.createPageSource(transaction, getHiveSession(config), split, table, ImmutableList.copyOf(getColumnHandles()));
     }
 
@@ -276,8 +278,7 @@ public class TestHivePageSink
                 new TestingNodeManager("fake-environment"),
                 new HiveEventClient(),
                 getHiveSessionProperties(config),
-                stats,
-                getDefaultOrcFileWriterFactory(config, HDFS_ENVIRONMENT));
+                stats);
         return provider.createPageSink(transaction, getHiveSession(config), handle);
     }
 

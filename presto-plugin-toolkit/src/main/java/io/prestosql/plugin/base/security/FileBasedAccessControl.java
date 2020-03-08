@@ -29,12 +29,12 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
-import static io.prestosql.plugin.base.JsonUtils.parseJson;
 import static io.prestosql.plugin.base.security.TableAccessControlRule.TablePrivilege.DELETE;
 import static io.prestosql.plugin.base.security.TableAccessControlRule.TablePrivilege.GRANT_SELECT;
 import static io.prestosql.plugin.base.security.TableAccessControlRule.TablePrivilege.INSERT;
 import static io.prestosql.plugin.base.security.TableAccessControlRule.TablePrivilege.OWNERSHIP;
 import static io.prestosql.plugin.base.security.TableAccessControlRule.TablePrivilege.SELECT;
+import static io.prestosql.plugin.base.util.JsonUtils.parseJson;
 import static io.prestosql.spi.security.AccessDeniedException.denyAddColumn;
 import static io.prestosql.spi.security.AccessDeniedException.denyCommentTable;
 import static io.prestosql.spi.security.AccessDeniedException.denyCreateSchema;
@@ -51,6 +51,7 @@ import static io.prestosql.spi.security.AccessDeniedException.denyInsertTable;
 import static io.prestosql.spi.security.AccessDeniedException.denyRenameColumn;
 import static io.prestosql.spi.security.AccessDeniedException.denyRenameSchema;
 import static io.prestosql.spi.security.AccessDeniedException.denyRenameTable;
+import static io.prestosql.spi.security.AccessDeniedException.denyRenameView;
 import static io.prestosql.spi.security.AccessDeniedException.denyRevokeTablePrivilege;
 import static io.prestosql.spi.security.AccessDeniedException.denySelectTable;
 import static io.prestosql.spi.security.AccessDeniedException.denySetCatalogSessionProperty;
@@ -150,7 +151,7 @@ public class FileBasedAccessControl
     @Override
     public void checkCanRenameTable(ConnectorSecurityContext context, SchemaTableName tableName, SchemaTableName newTableName)
     {
-        if (!checkTablePermission(context, tableName, OWNERSHIP)) {
+        if (!checkTablePermission(context, tableName, OWNERSHIP) || !checkTablePermission(context, newTableName, OWNERSHIP)) {
             denyRenameTable(tableName.toString(), newTableName.toString());
         }
     }
@@ -217,6 +218,14 @@ public class FileBasedAccessControl
     {
         if (!isSchemaOwner(context, viewName.getSchemaName())) {
             denyCreateView(viewName.toString());
+        }
+    }
+
+    @Override
+    public void checkCanRenameView(ConnectorSecurityContext context, SchemaTableName viewName, SchemaTableName newViewName)
+    {
+        if (!checkTablePermission(context, viewName, OWNERSHIP) || !checkTablePermission(context, newViewName, OWNERSHIP)) {
+            denyRenameView(viewName.toString(), newViewName.toString());
         }
     }
 

@@ -14,7 +14,6 @@
 package io.prestosql.operator;
 
 import com.google.common.collect.ImmutableList;
-import io.prestosql.Session;
 import io.prestosql.memory.context.MemoryTrackingContext;
 import io.prestosql.operator.WorkProcessor.TransformationState;
 import io.prestosql.operator.WorkProcessorOperatorAdapter.AdapterWorkProcessorOperator;
@@ -103,13 +102,11 @@ public class TopNOperator
 
         @Override
         public WorkProcessorOperator create(
-                Session session,
-                MemoryTrackingContext memoryTrackingContext,
-                DriverYieldSignal yieldSignal,
+                ProcessorContext processorContext,
                 WorkProcessor<Page> sourcePages)
         {
             return new TopNOperator(
-                    memoryTrackingContext,
+                    processorContext.getMemoryTrackingContext(),
                     Optional.of(sourcePages),
                     sourceTypes,
                     n,
@@ -118,13 +115,10 @@ public class TopNOperator
         }
 
         @Override
-        public AdapterWorkProcessorOperator create(
-                Session session,
-                MemoryTrackingContext memoryTrackingContext,
-                DriverYieldSignal yieldSignal)
+        public AdapterWorkProcessorOperator create(ProcessorContext processorContext)
         {
             return new TopNOperator(
-                    memoryTrackingContext,
+                    processorContext.getMemoryTrackingContext(),
                     Optional.empty(),
                     sourceTypes,
                     n,

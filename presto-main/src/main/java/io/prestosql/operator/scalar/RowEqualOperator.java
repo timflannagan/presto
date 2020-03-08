@@ -48,7 +48,8 @@ public class RowEqualOperator
                 ImmutableList.of(comparableWithVariadicBound("T", "row")),
                 ImmutableList.of(),
                 BOOLEAN.getTypeSignature(),
-                ImmutableList.of(new TypeSignature("T"), new TypeSignature("T")));
+                ImmutableList.of(new TypeSignature("T"), new TypeSignature("T")),
+                true);
     }
 
     @Override
@@ -62,8 +63,7 @@ public class RowEqualOperator
                         valueTypeArgumentProperty(RETURN_NULL_ON_NULL)),
                 METHOD_HANDLE
                         .bindTo(type)
-                        .bindTo(resolveFieldEqualOperators(type, metadata)),
-                isDeterministic());
+                        .bindTo(resolveFieldEqualOperators(type, metadata)));
     }
 
     public static List<MethodHandle> resolveFieldEqualOperators(RowType rowType, Metadata metadata)

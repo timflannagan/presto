@@ -80,7 +80,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
-import java.util.stream.Stream;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.collect.ImmutableMap.toImmutableMap;
@@ -361,18 +360,17 @@ public class ElasticsearchClient
         List<ElasticsearchNode> nodes = ImmutableList.copyOf(nodeById.values());
 
         for (List<SearchShardsResponse.Shard> shardGroup : shardsResponse.getShardGroups()) {
-            Stream<SearchShardsResponse.Shard> preferred = shardGroup.stream()
-                    .sorted(this::shardPreference);
-
-            Optional<SearchShardsResponse.Shard> candidate = preferred
+            Optional<SearchShardsResponse.Shard> candidate = shardGroup.stream()
                     .filter(shard -> shard.getNode() != null && nodeById.containsKey(shard.getNode()))
-                    .findFirst();
+                    .min(this::shardPreference);
 
             SearchShardsResponse.Shard chosen;
             ElasticsearchNode node;
             if (!candidate.isPresent()) {
                 // pick an arbitrary shard with and assign to an arbitrary node
-                chosen = preferred.findFirst().get();
+                chosen = shardGroup.stream()
+                        .min(this::shardPreference)
+                        .get();
                 node = nodes.get(chosen.getShard() % nodes.size());
             }
             else {
@@ -380,7 +378,7 @@ public class ElasticsearchClient
                 node = nodeById.get(chosen.getNode());
             }
 
-            shards.add(new Shard(chosen.getShard(), node.getAddress()));
+            shards.add(new Shard(chosen.getIndex(), chosen.getShard(), node.getAddress()));
         }
 
         return shards.build();
@@ -413,6 +411,27 @@ public class ElasticsearchClient
         });
     }
 
+    public List<String> getAliases()
+    {
+        return doRequest("/_aliases", body -> {
+            try {
+                ImmutableList.Builder<String> result = ImmutableList.builder();
+                JsonNode root = OBJECT_MAPPER.readTree(body);
+
+                Iterator<JsonNode> elements = root.elements();
+                while (elements.hasNext()) {
+                    JsonNode element = elements.next();
+                    JsonNode aliases = element.get("aliases");
+                    result.addAll(aliases.fieldNames());
+                }
+                return result.build();
+            }
+            catch (IOException e) {
+                throw new PrestoException(ELASTICSEARCH_INVALID_RESPONSE, e);
+            }
+        });
+    }
+
     public IndexMetadata getIndexMetadata(String index)
     {
         String path = format("/%s/_mappings", index);
@@ -420,7 +439,7 @@ public class ElasticsearchClient
         return doRequest(path, body -> {
             try {
                 JsonNode mappings = OBJECT_MAPPER.readTree(body)
-                        .get(index)
+                        .elements().next()
                         .get("mappings");
 
                 if (!mappings.has("properties")) {
@@ -448,22 +467,32 @@ public class ElasticsearchClient
 
             String name = field.getKey();
             JsonNode value = field.getValue();
-            if (value.has("type")) {
-                String type = value.get("type").asText();
 
-                if (type.equals("date")) {
+            //default type is object
+            String type = "object";
+            if (value.has("type")) {
+                type = value.get("type").asText();
+            }
+            switch (type) {
+                case "date":
                     List<String> formats = ImmutableList.of();
                     if (value.has("format")) {
                         formats = Arrays.asList(value.get("format").asText().split("\\|\\|"));
                     }
                     result.add(new IndexMetadata.Field(name, new IndexMetadata.DateTimeType(formats)));
-                }
-                else {
+                    break;
+
+                case "object":
+                    if (value.has("properties")) {
+                        result.add(new IndexMetadata.Field(name, parseType(value.get("properties"))));
+                    }
+                    else {
+                        LOG.debug("Ignoring empty object field: %s", name);
+                    }
+                    break;
+
+                default:
                     result.add(new IndexMetadata.Field(name, new IndexMetadata.PrimitiveType(type)));
-                }
-            }
-            else if (value.has("properties")) {
-                result.add(new IndexMetadata.Field(name, parseType(value.get("properties"))));
             }
         }
 

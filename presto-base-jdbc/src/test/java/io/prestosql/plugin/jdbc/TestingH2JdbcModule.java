@@ -34,16 +34,19 @@ class TestingH2JdbcModule
     public void configure(Binder binder)
     {
         configBinder(binder).bindConfig(BaseJdbcConfig.class);
+        configBinder(binder).bindConfig(TypeHandlingJdbcConfig.class);
     }
 
     @Provides
-    public JdbcClient provideJdbcClient(BaseJdbcConfig config, @StatsCollecting ConnectionFactory connectionFactory)
+    @ForBaseJdbc
+    public JdbcClient provideJdbcClient(BaseJdbcConfig config, ConnectionFactory connectionFactory)
     {
         return new BaseJdbcClient(config, "\"", connectionFactory);
     }
 
     @Provides
     @Singleton
+    @ForBaseJdbc
     public ConnectionFactory getConnectionFactory(BaseJdbcConfig config, CredentialProvider credentialProvider)
     {
         return new DriverConnectionFactory(new Driver(), config, credentialProvider);

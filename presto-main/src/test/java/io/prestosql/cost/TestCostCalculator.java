@@ -69,6 +69,7 @@ import static com.google.common.collect.ImmutableList.toImmutableList;
 import static io.prestosql.plugin.tpch.TpchTransactionHandle.INSTANCE;
 import static io.prestosql.spi.type.BigintType.BIGINT;
 import static io.prestosql.spi.type.VarcharType.VARCHAR;
+import static io.prestosql.sql.analyzer.TypeSignatureTranslator.toSqlType;
 import static io.prestosql.sql.planner.plan.AggregationNode.singleGroupingSet;
 import static io.prestosql.sql.planner.plan.ExchangeNode.Scope.LOCAL;
 import static io.prestosql.sql.planner.plan.ExchangeNode.Scope.REMOTE;
@@ -102,7 +103,7 @@ public class TestCostCalculator
 
         session = testSessionBuilder().setCatalog("tpch").build();
 
-        localQueryRunner = new LocalQueryRunner(session);
+        localQueryRunner = LocalQueryRunner.create(session);
         localQueryRunner.createCatalog("tpch", new TpchConnectorFactory(), ImmutableMap.of());
 
         planFragmenter = new PlanFragmenter(localQueryRunner.getMetadata(), localQueryRunner.getNodePartitioningManager(), new QueryManagerConfig());
@@ -147,7 +148,7 @@ public class TestCostCalculator
     public void testProject()
     {
         TableScanNode tableScan = tableScan("ts", "orderkey");
-        PlanNode project = project("project", tableScan, "string", new Cast(new SymbolReference("orderkey"), "STRING"));
+        PlanNode project = project("project", tableScan, "string", new Cast(new SymbolReference("orderkey"), toSqlType(VARCHAR)));
         Map<String, PlanCostEstimate> costs = ImmutableMap.of("ts", cpuCost(1000));
         Map<String, PlanNodeStatsEstimate> stats = ImmutableMap.of(
                 "project", statsEstimate(project, 4000),

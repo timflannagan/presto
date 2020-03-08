@@ -16,11 +16,12 @@ package io.prestosql.testing;
 import com.google.common.collect.ImmutableMap;
 import io.prestosql.metadata.QualifiedObjectName;
 import io.prestosql.plugin.base.security.AllowAllSystemAccessControl;
+import io.prestosql.security.AccessControlConfig;
 import io.prestosql.security.AccessControlManager;
 import io.prestosql.security.SecurityContext;
 import io.prestosql.spi.connector.CatalogSchemaName;
+import io.prestosql.spi.connector.CatalogSchemaTableName;
 import io.prestosql.spi.security.Identity;
-import io.prestosql.transaction.TransactionId;
 import io.prestosql.transaction.TransactionManager;
 
 import javax.inject.Inject;
@@ -48,10 +49,12 @@ import static io.prestosql.spi.security.AccessDeniedException.denyInsertTable;
 import static io.prestosql.spi.security.AccessDeniedException.denyRenameColumn;
 import static io.prestosql.spi.security.AccessDeniedException.denyRenameSchema;
 import static io.prestosql.spi.security.AccessDeniedException.denyRenameTable;
+import static io.prestosql.spi.security.AccessDeniedException.denyRenameView;
 import static io.prestosql.spi.security.AccessDeniedException.denySelectColumns;
 import static io.prestosql.spi.security.AccessDeniedException.denySetCatalogSessionProperty;
 import static io.prestosql.spi.security.AccessDeniedException.denySetSystemSessionProperty;
 import static io.prestosql.spi.security.AccessDeniedException.denySetUser;
+import static io.prestosql.spi.security.AccessDeniedException.denyShowColumnsMetadata;
 import static io.prestosql.testing.TestingAccessControlManager.TestingPrivilegeType.ADD_COLUMN;
 import static io.prestosql.testing.TestingAccessControlManager.TestingPrivilegeType.COMMENT_TABLE;
 import static io.prestosql.testing.TestingAccessControlManager.TestingPrivilegeType.CREATE_SCHEMA;
@@ -67,9 +70,11 @@ import static io.prestosql.testing.TestingAccessControlManager.TestingPrivilegeT
 import static io.prestosql.testing.TestingAccessControlManager.TestingPrivilegeType.RENAME_COLUMN;
 import static io.prestosql.testing.TestingAccessControlManager.TestingPrivilegeType.RENAME_SCHEMA;
 import static io.prestosql.testing.TestingAccessControlManager.TestingPrivilegeType.RENAME_TABLE;
+import static io.prestosql.testing.TestingAccessControlManager.TestingPrivilegeType.RENAME_VIEW;
 import static io.prestosql.testing.TestingAccessControlManager.TestingPrivilegeType.SELECT_COLUMN;
 import static io.prestosql.testing.TestingAccessControlManager.TestingPrivilegeType.SET_SESSION;
 import static io.prestosql.testing.TestingAccessControlManager.TestingPrivilegeType.SET_USER;
+import static io.prestosql.testing.TestingAccessControlManager.TestingPrivilegeType.SHOW_COLUMNS;
 import static java.util.Objects.requireNonNull;
 
 public class TestingAccessControlManager
@@ -80,7 +85,7 @@ public class TestingAccessControlManager
     @Inject
     public TestingAccessControlManager(TransactionManager transactionManager)
     {
-        super(transactionManager);
+        super(transactionManager, new AccessControlConfig());
         setSystemAccessControl(AllowAllSystemAccessControl.NAME, ImmutableMap.of());
     }
 
@@ -253,6 +258,17 @@ public class TestingAccessControlManager
     }
 
     @Override
+    public void checkCanRenameView(SecurityContext context, QualifiedObjectName viewName, QualifiedObjectName newViewName)
+    {
+        if (shouldDenyPrivilege(context.getIdentity().getUser(), viewName.getObjectName(), RENAME_VIEW)) {
+            denyRenameView(viewName.toString(), newViewName.toString());
+        }
+        if (denyPrivileges.isEmpty()) {
+            super.checkCanRenameView(context, viewName, newViewName);
+        }
+    }
+
+    @Override
     public void checkCanDropView(SecurityContext context, QualifiedObjectName viewName)
     {
         if (shouldDenyPrivilege(context.getIdentity().getUser(), viewName.getObjectName(), DROP_VIEW)) {
@@ -286,13 +302,24 @@ public class TestingAccessControlManager
     }
 
     @Override
-    public void checkCanSetCatalogSessionProperty(TransactionId transactionId, Identity identity, String catalogName, String propertyName)
+    public void checkCanShowColumnsMetadata(SecurityContext context, CatalogSchemaTableName table)
     {
-        if (shouldDenyPrivilege(identity.getUser(), catalogName + "." + propertyName, SET_SESSION)) {
+        if (shouldDenyPrivilege(context.getIdentity().getUser(), table.getSchemaTableName().getTableName(), SHOW_COLUMNS)) {
+            denyShowColumnsMetadata(table.getSchemaTableName().toString());
+        }
+        if (denyPrivileges.isEmpty()) {
+            super.checkCanShowColumnsMetadata(context, table);
+        }
+    }
+
+    @Override
+    public void checkCanSetCatalogSessionProperty(SecurityContext context, String catalogName, String propertyName)
+    {
+        if (shouldDenyPrivilege(context.getIdentity().getUser(), catalogName + "." + propertyName, SET_SESSION)) {
             denySetCatalogSessionProperty(catalogName, propertyName);
         }
         if (denyPrivileges.isEmpty()) {
-            super.checkCanSetCatalogSessionProperty(transactionId, identity, catalogName, propertyName);
+            super.checkCanSetCatalogSessionProperty(context, catalogName, propertyName);
         }
     }
 
@@ -327,9 +354,9 @@ public class TestingAccessControlManager
     {
         SET_USER,
         CREATE_SCHEMA, DROP_SCHEMA, RENAME_SCHEMA,
-        CREATE_TABLE, DROP_TABLE, RENAME_TABLE, COMMENT_TABLE, INSERT_TABLE, DELETE_TABLE,
+        CREATE_TABLE, DROP_TABLE, RENAME_TABLE, COMMENT_TABLE, INSERT_TABLE, DELETE_TABLE, SHOW_COLUMNS,
         ADD_COLUMN, DROP_COLUMN, RENAME_COLUMN, SELECT_COLUMN,
-        CREATE_VIEW, DROP_VIEW, CREATE_VIEW_WITH_SELECT_COLUMNS,
+        CREATE_VIEW, RENAME_VIEW, DROP_VIEW, CREATE_VIEW_WITH_SELECT_COLUMNS,
         SET_SESSION
     }
 

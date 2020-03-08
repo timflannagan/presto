@@ -234,7 +234,7 @@ public class TestWorkProcessorPipelineSourceOperator
         return getOnlyElement(rowPagesBuilder(BIGINT).addSequencePage(pageNumber, pageNumber).build());
     }
 
-    private class TestWorkProcessorSourceOperatorFactory
+    private static class TestWorkProcessorSourceOperatorFactory
             implements WorkProcessorSourceOperatorFactory, SourceOperatorFactory
     {
         final int operatorId;
@@ -299,7 +299,7 @@ public class TestWorkProcessorPipelineSourceOperator
         }
     }
 
-    private class TestWorkProcessorSourceOperator
+    private static class TestWorkProcessorSourceOperator
             implements WorkProcessorSourceOperator
     {
         final WorkProcessor<Page> pages;
@@ -374,7 +374,7 @@ public class TestWorkProcessorPipelineSourceOperator
         }
     }
 
-    private class TestWorkProcessorOperatorFactory
+    private static class TestWorkProcessorOperatorFactory
             implements WorkProcessorOperatorFactory, OperatorFactory
     {
         final int operatorId;
@@ -407,7 +407,7 @@ public class TestWorkProcessorPipelineSourceOperator
         }
 
         @Override
-        public WorkProcessorOperator create(Session session, MemoryTrackingContext memoryTrackingContext, DriverYieldSignal yieldSignal, WorkProcessor<Page> sourcePages)
+        public WorkProcessorOperator create(ProcessorContext processorContext, WorkProcessor<Page> sourcePages)
         {
             assertNull(operator, "source operator already created");
             operator = new TestWorkProcessorOperator(sourcePages.transform(transformation));
@@ -433,7 +433,7 @@ public class TestWorkProcessorPipelineSourceOperator
         }
     }
 
-    private class TestWorkProcessorOperator
+    private static class TestWorkProcessorOperator
             implements WorkProcessorOperator
     {
         final WorkProcessor<Page> pages;
@@ -466,7 +466,7 @@ public class TestWorkProcessorPipelineSourceOperator
         }
     }
 
-    private class TestOperatorInfo
+    private static class TestOperatorInfo
             implements OperatorInfo
     {
         int count;

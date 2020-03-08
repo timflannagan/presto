@@ -21,7 +21,6 @@ import io.prestosql.spi.connector.SchemaTableName;
 import io.prestosql.spi.security.Identity;
 import io.prestosql.spi.security.PrestoPrincipal;
 import io.prestosql.spi.security.Privilege;
-import io.prestosql.transaction.TransactionId;
 
 import java.security.Principal;
 import java.util.List;
@@ -41,11 +40,6 @@ public interface AccessControl
      * Filter the list of catalogs to those visible to the identity.
      */
     Set<String> filterCatalogs(Identity identity, Set<String> catalogs);
-
-    /**
-     * Check whether identity is allowed to access catalog
-     */
-    void checkCanAccessCatalog(Identity identity, String catalogName);
 
     /**
      * Check if identity is allowed to create the specified schema.
@@ -186,6 +180,13 @@ public interface AccessControl
     void checkCanCreateView(SecurityContext context, QualifiedObjectName viewName);
 
     /**
+     * Check if identity is allowed to rename the specified view.
+     *
+     * @throws io.prestosql.spi.security.AccessDeniedException if not allowed
+     */
+    void checkCanRenameView(SecurityContext context, QualifiedObjectName viewName, QualifiedObjectName newViewName);
+
+    /**
      * Check if identity is allowed to drop the specified view.
      *
      * @throws io.prestosql.spi.security.AccessDeniedException if not allowed
@@ -225,7 +226,7 @@ public interface AccessControl
      *
      * @throws io.prestosql.spi.security.AccessDeniedException if not allowed
      */
-    void checkCanSetCatalogSessionProperty(TransactionId transactionId, Identity identity, String catalogName, String propertyName);
+    void checkCanSetCatalogSessionProperty(SecurityContext context, String catalogName, String propertyName);
 
     /**
      * Check if identity is allowed to select from the specified columns.  The column set can be empty.
@@ -267,7 +268,7 @@ public interface AccessControl
      *
      * @throws io.prestosql.spi.security.AccessDeniedException if not allowed
      */
-    void checkCanSetRole(TransactionId transactionId, Identity identity, String role, String catalogName);
+    void checkCanSetRole(SecurityContext context, String role, String catalogName);
 
     /**
      * Check if identity is allowed to show roles on the specified catalog.

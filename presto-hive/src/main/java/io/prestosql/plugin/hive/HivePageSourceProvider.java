@@ -60,27 +60,29 @@ import static java.util.stream.Collectors.toList;
 public class HivePageSourceProvider
         implements ConnectorPageSourceProvider
 {
+    private final TypeManager typeManager;
     private final DateTimeZone hiveStorageTimeZone;
     private final HdfsEnvironment hdfsEnvironment;
-    private final Set<HiveRecordCursorProvider> cursorProviders;
-    private final TypeManager typeManager;
-
     private final Set<HivePageSourceFactory> pageSourceFactories;
+    private final Set<HiveRecordCursorProvider> cursorProviders;
 
     @Inject
     public HivePageSourceProvider(
+            TypeManager typeManager,
             HiveConfig hiveConfig,
             HdfsEnvironment hdfsEnvironment,
-            Set<HiveRecordCursorProvider> cursorProviders,
             Set<HivePageSourceFactory> pageSourceFactories,
-            TypeManager typeManager)
+            Set<HiveRecordCursorProvider> cursorProviders,
+            GenericHiveRecordCursorProvider genericCursorProvider)
     {
-        requireNonNull(hiveConfig, "hiveConfig is null");
-        this.hiveStorageTimeZone = hiveConfig.getDateTimeZone();
-        this.hdfsEnvironment = requireNonNull(hdfsEnvironment, "hdfsEnvironment is null");
-        this.cursorProviders = ImmutableSet.copyOf(requireNonNull(cursorProviders, "cursorProviders is null"));
-        this.pageSourceFactories = ImmutableSet.copyOf(requireNonNull(pageSourceFactories, "pageSourceFactories is null"));
         this.typeManager = requireNonNull(typeManager, "typeManager is null");
+        this.hiveStorageTimeZone = requireNonNull(hiveConfig, "hiveConfig is null").getDateTimeZone();
+        this.hdfsEnvironment = requireNonNull(hdfsEnvironment, "hdfsEnvironment is null");
+        this.pageSourceFactories = ImmutableSet.copyOf(requireNonNull(pageSourceFactories, "pageSourceFactories is null"));
+        this.cursorProviders = ImmutableSet.<HiveRecordCursorProvider>builder()
+                .addAll(requireNonNull(cursorProviders, "cursorProviders is null"))
+                .add(genericCursorProvider) // generic should be last, as a fallback option
+                .build();
     }
 
     @Override
@@ -104,8 +106,8 @@ public class HivePageSourceProvider
         Configuration configuration = hdfsEnvironment.getConfiguration(new HdfsContext(session, hiveSplit.getDatabase(), hiveSplit.getTable()), path);
 
         Optional<ConnectorPageSource> pageSource = createHivePageSource(
-                cursorProviders,
                 pageSourceFactories,
+                cursorProviders,
                 configuration,
                 session,
                 path,
@@ -130,8 +132,8 @@ public class HivePageSourceProvider
     }
 
     public static Optional<ConnectorPageSource> createHivePageSource(
-            Set<HiveRecordCursorProvider> cursorProviders,
             Set<HivePageSourceFactory> pageSourceFactories,
+            Set<HiveRecordCursorProvider> cursorProviders,
             Configuration configuration,
             ConnectorSession session,
             Path path,
@@ -323,12 +325,6 @@ public class HivePageSourceProvider
             return coercionFrom;
         }
 
-        /**
-         * @param columns columns that need to be returned to engine
-         * @param requiredInterimColumns columns that are needed for processing, but shouldn't be returned to engine (may overlaps with columns)
-         * @param columnCoercions map from hive column index to hive type
-         * @param bucketNumber empty if table is not bucketed, a number within [0, # bucket in table) otherwise
-         */
         public static List<ColumnMapping> buildColumnMappings(
                 List<HivePartitionKey> partitionKeys,
                 List<HiveColumnHandle> columns,

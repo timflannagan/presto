@@ -17,6 +17,8 @@ import com.google.common.collect.ImmutableList;
 import io.airlift.slice.Slice;
 import io.prestosql.annotation.UsedByGeneratedCode;
 import io.prestosql.metadata.BoundVariables;
+import io.prestosql.metadata.FunctionArgumentDefinition;
+import io.prestosql.metadata.FunctionMetadata;
 import io.prestosql.metadata.Metadata;
 import io.prestosql.metadata.OperatorNotFoundException;
 import io.prestosql.metadata.ResolvedFunction;
@@ -91,13 +93,19 @@ public final class FormatFunction
 
     private FormatFunction()
     {
-        super(Signature.builder()
-                .kind(SCALAR)
-                .name(NAME)
-                .typeVariableConstraints(withVariadicBound("T", "row"))
-                .argumentTypes(VARCHAR.getTypeSignature(), new TypeSignature("T"))
-                .returnType(VARCHAR.getTypeSignature())
-                .build());
+        super(new FunctionMetadata(
+                Signature.builder()
+                        .name(NAME)
+                        .typeVariableConstraints(withVariadicBound("T", "row"))
+                        .argumentTypes(VARCHAR.getTypeSignature(), new TypeSignature("T"))
+                        .returnType(VARCHAR.getTypeSignature())
+                        .build(),
+                false,
+                ImmutableList.of(new FunctionArgumentDefinition(false), new FunctionArgumentDefinition(false)),
+                true,
+                true,
+                "formats the input arguments using a format string",
+                SCALAR));
     }
 
     @Override
@@ -115,26 +123,7 @@ public final class FormatFunction
                 ImmutableList.of(
                         valueTypeArgumentProperty(RETURN_NULL_ON_NULL),
                         valueTypeArgumentProperty(RETURN_NULL_ON_NULL)),
-                METHOD_HANDLE.bindTo(converters),
-                true);
-    }
-
-    @Override
-    public boolean isHidden()
-    {
-        return true;
-    }
-
-    @Override
-    public boolean isDeterministic()
-    {
-        return true;
-    }
-
-    @Override
-    public String getDescription()
-    {
-        return "formats the input arguments using a format string";
+                METHOD_HANDLE.bindTo(converters));
     }
 
     public static void validateType(Metadata metadata, Type type)

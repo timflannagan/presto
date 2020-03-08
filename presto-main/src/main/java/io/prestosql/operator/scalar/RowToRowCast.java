@@ -15,6 +15,7 @@ package io.prestosql.operator.scalar;
 
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.hash.Hashing;
 import com.google.common.io.BaseEncoding;
 import io.airlift.bytecode.BytecodeBlock;
@@ -29,6 +30,7 @@ import io.prestosql.metadata.BoundVariables;
 import io.prestosql.metadata.Metadata;
 import io.prestosql.metadata.ResolvedFunction;
 import io.prestosql.metadata.SqlOperator;
+import io.prestosql.metadata.TypeVariableConstraint;
 import io.prestosql.spi.PrestoException;
 import io.prestosql.spi.StandardErrorCode;
 import io.prestosql.spi.block.Block;
@@ -63,6 +65,7 @@ import static io.prestosql.type.UnknownType.UNKNOWN;
 import static io.prestosql.util.CompilerUtils.defineClass;
 import static io.prestosql.util.CompilerUtils.makeClassName;
 import static io.prestosql.util.Reflection.methodHandle;
+import static java.nio.charset.StandardCharsets.UTF_8;
 
 public class RowToRowCast
         extends SqlOperator
@@ -71,7 +74,15 @@ public class RowToRowCast
 
     private RowToRowCast()
     {
-        super(CAST, ImmutableList.of(withVariadicBound("F", "row"), withVariadicBound("T", "row")), ImmutableList.of(), new TypeSignature("T"), ImmutableList.of(new TypeSignature("F")));
+        super(CAST,
+                ImmutableList.of(
+                        // this is technically a recursive constraint for cast, but TypeRegistry.canCast has explicit handling for row to row cast
+                        new TypeVariableConstraint("F", false, false, "row", ImmutableSet.of(new TypeSignature("T")), ImmutableSet.of()),
+                        withVariadicBound("T", "row")),
+                ImmutableList.of(),
+                new TypeSignature("T"),
+                ImmutableList.of(new TypeSignature("F")),
+                false);
     }
 
     @Override
@@ -88,8 +99,7 @@ public class RowToRowCast
         return new ScalarFunctionImplementation(
                 false,
                 ImmutableList.of(valueTypeArgumentProperty(RETURN_NULL_ON_NULL)),
-                methodHandle,
-                isDeterministic());
+                methodHandle);
     }
 
     private static Class<?> generateRowCast(Type fromType, Type toType, Metadata metadata)
@@ -101,7 +111,7 @@ public class RowToRowCast
 
         // Embed the MD5 hash code of input and output types into the generated class name instead of the raw type names,
         // which could prevent the class name from hitting the length limitation and invalid characters.
-        byte[] md5Suffix = Hashing.md5().hashBytes((fromType + "$" + toType).getBytes()).asBytes();
+        byte[] md5Suffix = Hashing.md5().hashBytes((fromType + "$" + toType).getBytes(UTF_8)).asBytes();
 
         ClassDefinition definition = new ClassDefinition(
                 a(PUBLIC, FINAL),

@@ -35,8 +35,10 @@ import java.io.OutputStream;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Map.Entry;
+import java.util.Optional;
 import java.util.TimeZone;
 
+import static io.prestosql.orc.metadata.PostScript.MAGIC;
 import static java.lang.Math.toIntExact;
 import static java.util.stream.Collectors.toList;
 
@@ -75,6 +77,7 @@ public class OrcMetadataWriter
                 .setCompression(toCompression(compression))
                 .setCompressionBlockSize(compressionBlockSize)
                 .setWriterVersion(useLegacyVersion ? HIVE_LEGACY_WRITER_VERSION : PRESTO_WRITER_VERSION)
+                .setMagic(MAGIC.toStringUtf8())
                 .build();
 
         return writeProtobufObject(output, postScriptProtobuf);
@@ -86,6 +89,7 @@ public class OrcMetadataWriter
     {
         OrcProto.Metadata metadataProtobuf = OrcProto.Metadata.newBuilder()
                 .addAllStripeStats(metadata.getStripeStatsList().stream()
+                        .map(Optional::get)
                         .map(OrcMetadataWriter::toStripeStatistics)
                         .collect(toList()))
                 .build();
@@ -115,7 +119,7 @@ public class OrcMetadataWriter
                 .addAllTypes(footer.getTypes().stream()
                         .map(OrcMetadataWriter::toType)
                         .collect(toList()))
-                .addAllStatistics(footer.getFileStats().stream()
+                .addAllStatistics(footer.getFileStats().map(ColumnMetadata::stream).orElseGet(java.util.stream.Stream::empty)
                         .map(OrcMetadataWriter::toColumnStatistics)
                         .collect(toList()))
                 .addAllMetadata(footer.getUserMetadata().entrySet().stream()
@@ -144,7 +148,9 @@ public class OrcMetadataWriter
     {
         Builder builder = Type.newBuilder()
                 .setKind(toTypeKind(type.getOrcTypeKind()))
-                .addAllSubtypes(type.getFieldTypeIndexes())
+                .addAllSubtypes(type.getFieldTypeIndexes().stream()
+                        .map(OrcColumnId::getId)
+                        .collect(toList()))
                 .addAllFieldNames(type.getFieldNames());
 
         if (type.getLength().isPresent()) {
@@ -298,7 +304,7 @@ public class OrcMetadataWriter
     private static OrcProto.Stream toStream(Stream stream)
     {
         return OrcProto.Stream.newBuilder()
-                .setColumn(stream.getColumn())
+                .setColumn(stream.getColumnId().getId())
                 .setKind(toStreamKind(stream.getStreamKind()))
                 .setLength(stream.getLength())
                 .build();

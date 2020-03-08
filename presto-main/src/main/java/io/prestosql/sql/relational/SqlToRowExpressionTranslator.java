@@ -18,23 +18,19 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import io.prestosql.Session;
 import io.prestosql.SystemSessionProperties;
-import io.prestosql.metadata.FunctionKind;
 import io.prestosql.metadata.Metadata;
 import io.prestosql.metadata.ResolvedFunction;
-import io.prestosql.spi.type.CharType;
 import io.prestosql.spi.type.DecimalParseResult;
 import io.prestosql.spi.type.Decimals;
 import io.prestosql.spi.type.RowType;
 import io.prestosql.spi.type.RowType.Field;
 import io.prestosql.spi.type.TimeZoneKey;
 import io.prestosql.spi.type.Type;
-import io.prestosql.spi.type.VarcharType;
 import io.prestosql.sql.planner.Symbol;
 import io.prestosql.sql.relational.SpecialForm.Form;
 import io.prestosql.sql.relational.optimizer.ExpressionOptimizer;
 import io.prestosql.sql.tree.ArithmeticBinaryExpression;
 import io.prestosql.sql.tree.ArithmeticUnaryExpression;
-import io.prestosql.sql.tree.ArrayConstructor;
 import io.prestosql.sql.tree.AstVisitor;
 import io.prestosql.sql.tree.BetweenPredicate;
 import io.prestosql.sql.tree.BinaryLiteral;
@@ -60,7 +56,6 @@ import io.prestosql.sql.tree.IsNotNullPredicate;
 import io.prestosql.sql.tree.IsNullPredicate;
 import io.prestosql.sql.tree.LambdaArgumentDeclaration;
 import io.prestosql.sql.tree.LambdaExpression;
-import io.prestosql.sql.tree.LikePredicate;
 import io.prestosql.sql.tree.LogicalBinaryExpression;
 import io.prestosql.sql.tree.LongLiteral;
 import io.prestosql.sql.tree.NodeRef;
@@ -76,7 +71,6 @@ import io.prestosql.sql.tree.SubscriptExpression;
 import io.prestosql.sql.tree.SymbolReference;
 import io.prestosql.sql.tree.TimeLiteral;
 import io.prestosql.sql.tree.TimestampLiteral;
-import io.prestosql.sql.tree.TryExpression;
 import io.prestosql.sql.tree.WhenClause;
 import io.prestosql.type.UnknownType;
 
@@ -118,7 +112,6 @@ import static io.prestosql.sql.relational.SpecialForm.Form.ROW_CONSTRUCTOR;
 import static io.prestosql.sql.relational.SpecialForm.Form.SWITCH;
 import static io.prestosql.sql.relational.SpecialForm.Form.WHEN;
 import static io.prestosql.type.JsonType.JSON;
-import static io.prestosql.type.LikePatternType.LIKE_PATTERN;
 import static io.prestosql.util.DateTimeUtils.parseDayTimeInterval;
 import static io.prestosql.util.DateTimeUtils.parseTimeWithTimeZone;
 import static io.prestosql.util.DateTimeUtils.parseTimeWithoutTimeZone;
@@ -132,7 +125,6 @@ public final class SqlToRowExpressionTranslator
 
     public static RowExpression translate(
             Expression expression,
-            FunctionKind functionKind,
             Map<NodeRef<Expression>, Type> types,
             Map<Symbol, Integer> layout,
             Metadata metadata,
@@ -141,7 +133,6 @@ public final class SqlToRowExpressionTranslator
     {
         Visitor visitor = new Visitor(
                 metadata,
-                functionKind,
                 types,
                 layout,
                 session.getTimeZoneKey(),
@@ -162,7 +153,6 @@ public final class SqlToRowExpressionTranslator
             extends AstVisitor<RowExpression, Void>
     {
         private final Metadata metadata;
-        private final FunctionKind functionKind;
         private final Map<NodeRef<Expression>, Type> types;
         private final Map<Symbol, Integer> layout;
         private final TimeZoneKey timeZoneKey;
@@ -171,14 +161,12 @@ public final class SqlToRowExpressionTranslator
 
         private Visitor(
                 Metadata metadata,
-                FunctionKind functionKind,
                 Map<NodeRef<Expression>, Type> types,
                 Map<Symbol, Integer> layout,
                 TimeZoneKey timeZoneKey,
                 boolean isLegacyTimestamp)
         {
             this.metadata = metadata;
-            this.functionKind = functionKind;
             this.types = ImmutableMap.copyOf(requireNonNull(types, "types is null"));
             this.layout = layout;
             this.timeZoneKey = timeZoneKey;
@@ -626,12 +614,6 @@ public final class SqlToRowExpressionTranslator
         }
 
         @Override
-        protected RowExpression visitTryExpression(TryExpression node, Void context)
-        {
-            return call(standardFunctionResolution.tryFunction(getType((node))), getType(node), process(node.getInnerExpression(), context));
-        }
-
-        @Override
         protected RowExpression visitInPredicate(InPredicate node, Void context)
         {
             ImmutableList.Builder<RowExpression> arguments = ImmutableList.builder();
@@ -703,34 +685,6 @@ public final class SqlToRowExpressionTranslator
         }
 
         @Override
-        protected RowExpression visitLikePredicate(LikePredicate node, Void context)
-        {
-            RowExpression value = process(node.getValue(), context);
-            RowExpression pattern = process(node.getPattern(), context);
-
-            if (node.getEscape().isPresent()) {
-                RowExpression escape = process(node.getEscape().get(), context);
-                return likeFunctionCall(value, new CallExpression(standardFunctionResolution.likePatternFunction(), LIKE_PATTERN, ImmutableList.of(pattern, escape)));
-            }
-
-            CallExpression patternCall = call(
-                    metadata.getCoercion(VARCHAR, LIKE_PATTERN),
-                    LIKE_PATTERN,
-                    pattern);
-            return likeFunctionCall(value, patternCall);
-        }
-
-        private RowExpression likeFunctionCall(RowExpression value, RowExpression pattern)
-        {
-            if (value.getType() instanceof VarcharType) {
-                return call(standardFunctionResolution.likeVarcharSignature(), BOOLEAN, value, pattern);
-            }
-
-            checkState(value.getType() instanceof CharType, "LIKE value type is neither VARCHAR or CHAR");
-            return call(standardFunctionResolution.likeCharFunction(value.getType()), BOOLEAN, value, pattern);
-        }
-
-        @Override
         protected RowExpression visitSubscriptExpression(SubscriptExpression node, Void context)
         {
             RowExpression base = process(node.getBase(), context);
@@ -741,18 +695,6 @@ public final class SqlToRowExpressionTranslator
                     getType(node),
                     base,
                     index);
-        }
-
-        @Override
-        protected RowExpression visitArrayConstructor(ArrayConstructor node, Void context)
-        {
-            List<RowExpression> arguments = node.getValues().stream()
-                    .map(value -> process(value, context))
-                    .collect(toImmutableList());
-            List<Type> argumentTypes = arguments.stream()
-                    .map(RowExpression::getType)
-                    .collect(toImmutableList());
-            return call(standardFunctionResolution.arrayConstructor(argumentTypes), getType(node), arguments);
         }
 
         @Override

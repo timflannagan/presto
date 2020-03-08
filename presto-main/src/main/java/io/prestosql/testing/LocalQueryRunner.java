@@ -58,6 +58,7 @@ import io.prestosql.execution.QueryPreparer;
 import io.prestosql.execution.QueryPreparer.PreparedQuery;
 import io.prestosql.execution.RenameColumnTask;
 import io.prestosql.execution.RenameTableTask;
+import io.prestosql.execution.RenameViewTask;
 import io.prestosql.execution.ResetSessionTask;
 import io.prestosql.execution.RollbackTask;
 import io.prestosql.execution.ScheduledSplit;
@@ -108,7 +109,7 @@ import io.prestosql.spi.PageIndexerFactory;
 import io.prestosql.spi.PageSorter;
 import io.prestosql.spi.Plugin;
 import io.prestosql.spi.connector.ConnectorFactory;
-import io.prestosql.spi.type.Type;
+import io.prestosql.spi.session.PropertyMetadata;
 import io.prestosql.spiller.FileSingleStreamSpillerFactory;
 import io.prestosql.spiller.GenericPartitioningSpillerFactory;
 import io.prestosql.spiller.GenericSpillerFactory;
@@ -156,6 +157,7 @@ import io.prestosql.sql.tree.DropView;
 import io.prestosql.sql.tree.Prepare;
 import io.prestosql.sql.tree.RenameColumn;
 import io.prestosql.sql.tree.RenameTable;
+import io.prestosql.sql.tree.RenameView;
 import io.prestosql.sql.tree.ResetSession;
 import io.prestosql.sql.tree.Rollback;
 import io.prestosql.sql.tree.SetPath;
@@ -199,6 +201,7 @@ import static io.prestosql.spi.connector.ConnectorSplitManager.SplitSchedulingSt
 import static io.prestosql.spi.connector.NotPartitionedPartitionHandle.NOT_PARTITIONED;
 import static io.prestosql.sql.ParameterUtils.parameterExtractor;
 import static io.prestosql.sql.ParsingUtil.createParsingOptions;
+import static io.prestosql.sql.planner.LogicalPlanner.Stage.OPTIMIZED_AND_VALIDATED;
 import static io.prestosql.sql.planner.optimizations.PlanNodeSearcher.searchFrom;
 import static io.prestosql.sql.testing.TreeAssertions.assertFormattedSql;
 import static io.prestosql.testing.TestingSession.TESTING_CATALOG;
@@ -219,8 +222,6 @@ public class LocalQueryRunner
     private final SqlParser sqlParser;
     private final PlanFragmenter planFragmenter;
     private final InMemoryNodeManager nodeManager;
-    private final PageSorter pageSorter;
-    private final PageIndexerFactory pageIndexerFactory;
     private final MetadataManager metadata;
     private final StatsCalculator statsCalculator;
     private final CostCalculator costCalculator;
@@ -248,30 +249,32 @@ public class LocalQueryRunner
     private final TaskManagerConfig taskManagerConfig;
     private final boolean alwaysRevokeMemory;
     private final NodeSpillConfig nodeSpillConfig;
-    private final NodeSchedulerConfig nodeSchedulerConfig;
     private final FeaturesConfig featuresConfig;
     private boolean printPlan;
 
     private final ReadWriteLock lock = new ReentrantReadWriteLock();
 
-    public LocalQueryRunner(Session defaultSession)
+    public static LocalQueryRunner create(Session defaultSession)
     {
-        this(defaultSession, new FeaturesConfig(), new NodeSpillConfig(), false, false);
+        return builder(defaultSession).build();
     }
 
-    public LocalQueryRunner(Session defaultSession, FeaturesConfig featuresConfig)
+    public static Builder builder(Session defaultSession)
     {
-        this(defaultSession, featuresConfig, new NodeSpillConfig(), false, false);
+        return new Builder(defaultSession);
     }
 
-    public LocalQueryRunner(Session defaultSession, FeaturesConfig featuresConfig, NodeSpillConfig nodeSpillConfig, boolean withInitialTransaction, boolean alwaysRevokeMemory)
-    {
-        this(defaultSession, featuresConfig, nodeSpillConfig, withInitialTransaction, alwaysRevokeMemory, 1);
-    }
-
-    private LocalQueryRunner(Session defaultSession, FeaturesConfig featuresConfig, NodeSpillConfig nodeSpillConfig, boolean withInitialTransaction, boolean alwaysRevokeMemory, int nodeCountForStats)
+    private LocalQueryRunner(
+            Session defaultSession,
+            FeaturesConfig featuresConfig,
+            NodeSpillConfig nodeSpillConfig,
+            boolean withInitialTransaction,
+            boolean alwaysRevokeMemory,
+            int nodeCountForStats,
+            Map<String, List<PropertyMetadata<?>>> defaultSessionProperties)
     {
         requireNonNull(defaultSession, "defaultSession is null");
+        requireNonNull(defaultSessionProperties, "defaultSessionProperties is null");
         checkArgument(!defaultSession.getTransactionId().isPresent() || !withInitialTransaction, "Already in transaction");
 
         this.taskManagerConfig = new TaskManagerConfig().setTaskConcurrency(4);
@@ -284,9 +287,9 @@ public class LocalQueryRunner
 
         this.sqlParser = new SqlParser();
         this.nodeManager = new InMemoryNodeManager();
-        this.pageSorter = new PagesIndexPageSorter(new PagesIndex.TestingFactory(false));
+        PageSorter pageSorter = new PagesIndexPageSorter(new PagesIndex.TestingFactory(false));
         this.indexManager = new IndexManager();
-        this.nodeSchedulerConfig = new NodeSchedulerConfig().setIncludeCoordinator(true);
+        NodeSchedulerConfig nodeSchedulerConfig = new NodeSchedulerConfig().setIncludeCoordinator(true);
         NodeScheduler nodeScheduler = new NodeScheduler(new UniformNodeSelectorFactory(nodeManager, nodeSchedulerConfig, new NodeTaskMap(finalizerService)));
         this.featuresConfig = requireNonNull(featuresConfig, "featuresConfig is null");
         this.pageSinkManager = new PageSinkManager();
@@ -309,7 +312,7 @@ public class LocalQueryRunner
         this.splitManager = new SplitManager(new QueryManagerConfig(), metadata);
         this.planFragmenter = new PlanFragmenter(this.metadata, this.nodePartitioningManager, new QueryManagerConfig());
         this.joinCompiler = new JoinCompiler(metadata);
-        this.pageIndexerFactory = new GroupByHashPageIndexerFactory(joinCompiler);
+        PageIndexerFactory pageIndexerFactory = new GroupByHashPageIndexerFactory(joinCompiler);
         this.statsCalculator = createNewStatsCalculator(metadata, new TypeAnalyzer(sqlParser, metadata));
         this.taskCountEstimator = new TaskCountEstimator(() -> nodeCountForStats);
         this.costCalculator = new CostCalculatorUsingExchanges(taskCountEstimator);
@@ -361,11 +364,12 @@ public class LocalQueryRunner
                 new EventListenerManager(),
                 new SessionPropertyDefaults(nodeInfo));
 
-        connectorManager.addConnectorFactory(globalSystemConnectorFactory);
+        connectorManager.addConnectorFactory(globalSystemConnectorFactory, globalSystemConnectorFactory.getClass()::getClassLoader);
         connectorManager.createCatalog(GlobalSystemConnector.NAME, GlobalSystemConnector.NAME, ImmutableMap.of());
 
         // add bogus connector for testing session properties
         catalogManager.registerCatalog(createBogusTestingCatalog(TESTING_CATALOG));
+        metadata.getSessionPropertyManager().addConnectorSessionProperties(new CatalogName(TESTING_CATALOG), defaultSessionProperties.getOrDefault(TESTING_CATALOG, ImmutableList.of()));
 
         // rewrite session to use managed SessionPropertyMetadata
         this.defaultSession = new Session(
@@ -400,6 +404,7 @@ public class LocalQueryRunner
                 .put(DropView.class, new DropViewTask())
                 .put(RenameColumn.class, new RenameColumnTask())
                 .put(RenameTable.class, new RenameTableTask())
+                .put(RenameView.class, new RenameViewTask())
                 .put(Comment.class, new CommentTask())
                 .put(ResetSession.class, new ResetSessionTask())
                 .put(SetSession.class, new SetSessionTask())
@@ -417,17 +422,6 @@ public class LocalQueryRunner
         this.spillerFactory = new GenericSpillerFactory(singleStreamSpillerFactory);
     }
 
-    public static LocalQueryRunner queryRunnerWithInitialTransaction(Session defaultSession)
-    {
-        checkArgument(!defaultSession.getTransactionId().isPresent(), "Already in transaction!");
-        return new LocalQueryRunner(defaultSession, new FeaturesConfig(), new NodeSpillConfig(), true, false);
-    }
-
-    public static LocalQueryRunner queryRunnerWithFakeNodeCountForStats(Session defaultSession, int nodeCount)
-    {
-        return new LocalQueryRunner(defaultSession, new FeaturesConfig(), new NodeSpillConfig(), false, false, nodeCount);
-    }
-
     @Override
     public void close()
     {
@@ -442,11 +436,6 @@ public class LocalQueryRunner
     public int getNodeCount()
     {
         return 1;
-    }
-
-    public void addType(Type type)
-    {
-        metadata.addType(type);
     }
 
     @Override
@@ -472,11 +461,13 @@ public class LocalQueryRunner
         return nodePartitioningManager;
     }
 
+    @Override
     public PageSourceManager getPageSourceManager()
     {
         return pageSourceManager;
     }
 
+    @Override
     public SplitManager getSplitManager()
     {
         return splitManager;
@@ -528,14 +519,14 @@ public class LocalQueryRunner
     public void createCatalog(String catalogName, ConnectorFactory connectorFactory, Map<String, String> properties)
     {
         nodeManager.addCurrentNodeConnector(new CatalogName(catalogName));
-        connectorManager.addConnectorFactory(connectorFactory);
+        connectorManager.addConnectorFactory(connectorFactory, connectorFactory.getClass()::getClassLoader);
         connectorManager.createCatalog(catalogName, connectorFactory.getName(), properties);
     }
 
     @Override
     public void installPlugin(Plugin plugin)
     {
-        pluginManager.installPlugin(plugin);
+        pluginManager.installPlugin(plugin, plugin.getClass()::getClassLoader);
     }
 
     @Override
@@ -787,7 +778,7 @@ public class LocalQueryRunner
     @Override
     public Plan createPlan(Session session, @Language("SQL") String sql, WarningCollector warningCollector)
     {
-        return createPlan(session, sql, LogicalPlanner.Stage.OPTIMIZED_AND_VALIDATED, warningCollector);
+        return createPlan(session, sql, OPTIMIZED_AND_VALIDATED, warningCollector);
     }
 
     public Plan createPlan(Session session, @Language("SQL") String sql, LogicalPlanner.Stage stage, WarningCollector warningCollector)
@@ -823,7 +814,7 @@ public class LocalQueryRunner
 
     public Plan createPlan(Session session, @Language("SQL") String sql, List<PlanOptimizer> optimizers, WarningCollector warningCollector)
     {
-        return createPlan(session, sql, optimizers, LogicalPlanner.Stage.OPTIMIZED_AND_VALIDATED, warningCollector);
+        return createPlan(session, sql, optimizers, OPTIMIZED_AND_VALIDATED, warningCollector);
     }
 
     public Plan createPlan(Session session, @Language("SQL") String sql, List<PlanOptimizer> optimizers, LogicalPlanner.Stage stage, WarningCollector warningCollector)
@@ -848,6 +839,7 @@ public class LocalQueryRunner
         LogicalPlanner logicalPlanner = new LogicalPlanner(session, optimizers, new PlanSanityChecker(true), idAllocator, metadata, new TypeAnalyzer(sqlParser, metadata), statsCalculator, costCalculator, warningCollector);
 
         Analysis analysis = analyzer.analyze(preparedQuery.getStatement());
+        // make LocalQueryRunner always compute plan statistics for test purposes
         return logicalPlanner.plan(analysis, stage);
     }
 
@@ -861,5 +853,69 @@ public class LocalQueryRunner
         return searchFrom(node)
                 .where(TableScanNode.class::isInstance)
                 .findAll();
+    }
+
+    public static class Builder
+    {
+        private Session defaultSession;
+        private FeaturesConfig featuresConfig = new FeaturesConfig();
+        private NodeSpillConfig nodeSpillConfig = new NodeSpillConfig();
+        private boolean initialTransaction;
+        private boolean alwaysRevokeMemory;
+        private Map<String, List<PropertyMetadata<?>>> defaultSessionProperties = ImmutableMap.of();
+        private int nodeCountForStats;
+
+        private Builder(Session defaultSession)
+        {
+            this.defaultSession = requireNonNull(defaultSession, "defaultSession is null");
+        }
+
+        public Builder withFeaturesConfig(FeaturesConfig featuresConfig)
+        {
+            this.featuresConfig = requireNonNull(featuresConfig, "featuresConfig is null");
+            return this;
+        }
+
+        public Builder withNodeSpillConfig(NodeSpillConfig nodeSpillConfig)
+        {
+            this.nodeSpillConfig = requireNonNull(nodeSpillConfig, "nodeSpillConfig is null");
+            return this;
+        }
+
+        public Builder withInitialTransaction()
+        {
+            this.initialTransaction = true;
+            return this;
+        }
+
+        public Builder withAlwaysRevokeMemory()
+        {
+            this.alwaysRevokeMemory = true;
+            return this;
+        }
+
+        public Builder withDefaultSessionProperties(Map<String, List<PropertyMetadata<?>>> defaultSessionProperties)
+        {
+            this.defaultSessionProperties = requireNonNull(defaultSessionProperties, "defaultSessionProperties is null");
+            return this;
+        }
+
+        public Builder withNodeCountForStats(int nodeCountForStats)
+        {
+            this.nodeCountForStats = nodeCountForStats;
+            return this;
+        }
+
+        public LocalQueryRunner build()
+        {
+            return new LocalQueryRunner(
+                    defaultSession,
+                    featuresConfig,
+                    nodeSpillConfig,
+                    initialTransaction,
+                    alwaysRevokeMemory,
+                    nodeCountForStats,
+                    defaultSessionProperties);
+        }
     }
 }

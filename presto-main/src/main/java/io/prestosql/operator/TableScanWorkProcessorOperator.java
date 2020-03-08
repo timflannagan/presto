@@ -28,6 +28,7 @@ import io.prestosql.spi.Page;
 import io.prestosql.spi.connector.ColumnHandle;
 import io.prestosql.spi.connector.ConnectorPageSource;
 import io.prestosql.spi.connector.UpdatablePageSource;
+import io.prestosql.spi.predicate.TupleDomain;
 import io.prestosql.split.PageSourceProvider;
 
 import java.io.IOException;
@@ -152,12 +153,13 @@ public class TableScanWorkProcessorOperator
             }
 
             checkState(source == null, "Table scan split already set");
-            source = pageSourceProvider.createPageSource(session, split, table, columns, null);
+            source = pageSourceProvider.createPageSource(session, split, table, columns, TupleDomain::all);
             return TransformationState.ofResult(
                     WorkProcessor.create(new ConnectorPageSourceToPages(aggregatedMemoryContext, source))
                             .map(page -> {
                                 processedPositions += page.getPositionCount();
-                                return recordMaterializedBytes(page, sizeInBytes -> processedBytes += sizeInBytes);
+                                recordMaterializedBytes(page, sizeInBytes -> processedBytes += sizeInBytes);
+                                return page;
                             }));
         }
 
@@ -256,7 +258,6 @@ public class TableScanWorkProcessorOperator
                 }
             }
 
-            // TODO: report operator stats
             return ProcessState.ofResult(page);
         }
     }

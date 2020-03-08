@@ -372,14 +372,6 @@ public class ClassLoaderSafeConnectorMetadata
     }
 
     @Override
-    public void beginQuery(ConnectorSession session, Collection<ConnectorTableHandle> tableHandles)
-    {
-        try (ThreadContextClassLoader ignored = new ThreadContextClassLoader(classLoader)) {
-            delegate.beginQuery(session, tableHandles);
-        }
-    }
-
-    @Override
     public void cleanupQuery(ConnectorSession session)
     {
         try (ThreadContextClassLoader ignored = new ThreadContextClassLoader(classLoader)) {
@@ -408,6 +400,14 @@ public class ClassLoaderSafeConnectorMetadata
     {
         try (ThreadContextClassLoader ignored = new ThreadContextClassLoader(classLoader)) {
             delegate.createView(session, viewName, definition, replace);
+        }
+    }
+
+    @Override
+    public void renameView(ConnectorSession session, SchemaTableName source, SchemaTableName target)
+    {
+        try (ThreadContextClassLoader ignored = new ThreadContextClassLoader(classLoader)) {
+            delegate.renameView(session, source, target);
         }
     }
 

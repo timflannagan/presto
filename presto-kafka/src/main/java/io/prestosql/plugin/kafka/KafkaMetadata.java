@@ -53,11 +53,11 @@ public class KafkaMetadata
 
     @Inject
     public KafkaMetadata(
-            KafkaConnectorConfig kafkaConnectorConfig,
+            KafkaConfig kafkaConfig,
             Supplier<Map<SchemaTableName, KafkaTopicDescription>> kafkaTableDescriptionSupplier)
     {
-        requireNonNull(kafkaConnectorConfig, "kafkaConfig is null");
-        this.hideInternalColumns = kafkaConnectorConfig.isHideInternalColumns();
+        requireNonNull(kafkaConfig, "kafkaConfig is null");
+        this.hideInternalColumns = kafkaConfig.isHideInternalColumns();
 
         requireNonNull(kafkaTableDescriptionSupplier, "kafkaTableDescriptionSupplier is null");
         this.tableDescriptions = kafkaTableDescriptionSupplier.get();
@@ -130,8 +130,7 @@ public class KafkaMetadata
 
         AtomicInteger index = new AtomicInteger(0);
 
-        kafkaTopicDescription.getKey().ifPresent(key ->
-        {
+        kafkaTopicDescription.getKey().ifPresent(key -> {
             List<KafkaTopicFieldDescription> fields = key.getFields();
             if (fields != null) {
                 for (KafkaTopicFieldDescription kafkaTopicFieldDescription : fields) {
@@ -140,8 +139,7 @@ public class KafkaMetadata
             }
         });
 
-        kafkaTopicDescription.getMessage().ifPresent(message ->
-        {
+        kafkaTopicDescription.getMessage().ifPresent(message -> {
             List<KafkaTopicFieldDescription> fields = message.getFields();
             if (fields != null) {
                 for (KafkaTopicFieldDescription kafkaTopicFieldDescription : fields) {

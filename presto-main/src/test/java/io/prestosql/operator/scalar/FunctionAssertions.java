@@ -24,10 +24,8 @@ import io.airlift.units.DataSize;
 import io.prestosql.Session;
 import io.prestosql.connector.CatalogName;
 import io.prestosql.execution.Lifespan;
-import io.prestosql.metadata.FunctionListBuilder;
 import io.prestosql.metadata.Metadata;
 import io.prestosql.metadata.Split;
-import io.prestosql.metadata.SqlFunction;
 import io.prestosql.metadata.TableHandle;
 import io.prestosql.operator.DriverContext;
 import io.prestosql.operator.DriverYieldSignal;
@@ -44,6 +42,7 @@ import io.prestosql.spi.ErrorCodeSupplier;
 import io.prestosql.spi.HostAddress;
 import io.prestosql.spi.Page;
 import io.prestosql.spi.PageBuilder;
+import io.prestosql.spi.Plugin;
 import io.prestosql.spi.block.Block;
 import io.prestosql.spi.connector.ColumnHandle;
 import io.prestosql.spi.connector.ConnectorPageSource;
@@ -108,7 +107,6 @@ import static io.prestosql.block.BlockAssertions.createSlicesBlock;
 import static io.prestosql.block.BlockAssertions.createStringsBlock;
 import static io.prestosql.block.BlockAssertions.createTimestampsWithTimezoneBlock;
 import static io.prestosql.memory.context.AggregatedMemoryContext.newSimpleAggregatedMemoryContext;
-import static io.prestosql.metadata.FunctionKind.SCALAR;
 import static io.prestosql.spi.StandardErrorCode.INVALID_CAST_ARGUMENT;
 import static io.prestosql.spi.StandardErrorCode.INVALID_FUNCTION_ARGUMENT;
 import static io.prestosql.spi.StandardErrorCode.NUMERIC_VALUE_OUT_OF_RANGE;
@@ -216,7 +214,9 @@ public final class FunctionAssertions
     public FunctionAssertions(Session session, FeaturesConfig featuresConfig)
     {
         this.session = requireNonNull(session, "session is null");
-        runner = new LocalQueryRunner(session, featuresConfig);
+        runner = LocalQueryRunner.builder(session)
+                .withFeaturesConfig(featuresConfig)
+                .build();
         metadata = runner.getMetadata();
         compiler = runner.getExpressionCompiler();
         typeAnalyzer = new TypeAnalyzer(SQL_PARSER, metadata);
@@ -227,21 +227,9 @@ public final class FunctionAssertions
         return metadata;
     }
 
-    public void addType(Type type)
+    public void installPlugin(Plugin plugin)
     {
-        runner.addType(type);
-    }
-
-    public FunctionAssertions addFunctions(List<? extends SqlFunction> functionInfos)
-    {
-        metadata.addFunctions(functionInfos);
-        return this;
-    }
-
-    public FunctionAssertions addScalarFunctions(Class<?> clazz)
-    {
-        metadata.addFunctions(new FunctionListBuilder().scalars(clazz).getFunctions());
-        return this;
+        runner.installPlugin(plugin);
     }
 
     public void assertFunction(String projection, Type expectedType, Object expected)
@@ -802,7 +790,7 @@ public final class FunctionAssertions
                     pageProcessor,
                     TEST_TABLE_HANDLE,
                     ImmutableList.of(),
-                    null,
+                    TupleDomain::all,
                     ImmutableList.of(projection.getType()),
                     new DataSize(0, BYTE),
                     0);
@@ -817,7 +805,7 @@ public final class FunctionAssertions
 
     private RowExpression toRowExpression(Expression projection, Map<NodeRef<Expression>, Type> expressionTypes, Map<Symbol, Integer> layout)
     {
-        return translate(projection, SCALAR, expressionTypes, layout, metadata, session, false);
+        return translate(projection, expressionTypes, layout, metadata, session, false);
     }
 
     private static Page getAtMostOnePage(Operator operator, Page sourcePage)

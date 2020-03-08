@@ -16,8 +16,8 @@ package io.prestosql.sql.relational.optimizer;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import io.prestosql.Session;
+import io.prestosql.metadata.FunctionMetadata;
 import io.prestosql.metadata.Metadata;
-import io.prestosql.operator.scalar.ScalarFunctionImplementation;
 import io.prestosql.spi.connector.ConnectorSession;
 import io.prestosql.spi.type.ArrayType;
 import io.prestosql.spi.type.MapType;
@@ -45,7 +45,6 @@ import static io.prestosql.metadata.Signature.mangleOperatorName;
 import static io.prestosql.operator.scalar.JsonStringToArrayCast.JSON_STRING_TO_ARRAY_NAME;
 import static io.prestosql.operator.scalar.JsonStringToMapCast.JSON_STRING_TO_MAP_NAME;
 import static io.prestosql.operator.scalar.JsonStringToRowCast.JSON_STRING_TO_ROW_NAME;
-import static io.prestosql.operator.scalar.ScalarFunctionImplementation.NullConvention.RETURN_NULL_ON_NULL;
 import static io.prestosql.spi.function.OperatorType.CAST;
 import static io.prestosql.spi.type.BooleanType.BOOLEAN;
 import static io.prestosql.spi.type.VarcharType.VARCHAR;
@@ -93,14 +92,14 @@ public class ExpressionOptimizer
                 call = rewriteCast(call);
             }
 
-            ScalarFunctionImplementation function = metadata.getScalarFunctionImplementation(call.getResolvedFunction());
             List<RowExpression> arguments = call.getArguments().stream()
                     .map(argument -> argument.accept(this, context))
                     .collect(toImmutableList());
 
             // TODO: optimize function calls with lambda arguments. For example, apply(x -> x + 2, 1)
-            if (Iterables.all(arguments, instanceOf(ConstantExpression.class)) && function.isDeterministic()) {
-                MethodHandle method = function.getMethodHandle();
+            FunctionMetadata functionMetadata = metadata.getFunctionMetadata(call.getResolvedFunction());
+            if (Iterables.all(arguments, instanceOf(ConstantExpression.class)) && functionMetadata.isDeterministic()) {
+                MethodHandle method = metadata.getScalarFunctionImplementation(call.getResolvedFunction()).getMethodHandle();
 
                 if (method.type().parameterCount() > 0 && method.type().parameterType(0) == ConnectorSession.class) {
                     method = method.bindTo(session);
@@ -111,7 +110,7 @@ public class ExpressionOptimizer
                 for (RowExpression argument : arguments) {
                     Object value = ((ConstantExpression) argument).getValue();
                     // if any argument is null, return null
-                    if (value == null && function.getArgumentProperty(index).getNullConvention() == RETURN_NULL_ON_NULL) {
+                    if (value == null && !functionMetadata.getArgumentDefinitions().get(index).isNullable()) {
                         return constantNull(call.getType());
                     }
                     constantArguments.add(value);

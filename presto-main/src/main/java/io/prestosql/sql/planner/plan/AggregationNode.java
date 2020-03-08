@@ -19,9 +19,9 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
+import io.prestosql.metadata.AggregationFunctionMetadata;
 import io.prestosql.metadata.Metadata;
 import io.prestosql.metadata.ResolvedFunction;
-import io.prestosql.operator.aggregation.InternalAggregationFunction;
 import io.prestosql.spi.type.TypeSignature;
 import io.prestosql.sql.planner.OrderingScheme;
 import io.prestosql.sql.planner.Symbol;
@@ -229,8 +229,9 @@ public class AggregationNode
 
         boolean decomposableFunctions = getAggregations().values().stream()
                 .map(Aggregation::getResolvedFunction)
-                .map(metadata::getAggregateFunctionImplementation)
-                .allMatch(InternalAggregationFunction::isDecomposable);
+                .map(metadata::getAggregationFunctionMetadata)
+                .map(AggregationFunctionMetadata::getIntermediateType)
+                .allMatch(Optional::isPresent);
 
         return !hasOrderBy && !hasDistinct && decomposableFunctions;
     }
@@ -246,13 +247,15 @@ public class AggregationNode
         // there is no need for distributed aggregation. Single node FINAL aggregation will suffice,
         // since all input have to be aggregated into one line output.
         //
-        // 2. aggregations that must produce default output and are not decomposable, we can not distribute them.
+        // 2. aggregations that must produce default output and are not decomposable, we cannot distribute them.
         return (hasEmptyGroupingSet() && !hasNonEmptyGroupingSet()) || (hasDefaultOutput() && !isDecomposable(metadata));
     }
 
     public boolean isStreamable()
     {
-        return !preGroupedSymbols.isEmpty() && groupingSets.getGroupingSetCount() == 1 && groupingSets.getGlobalGroupingSets().isEmpty();
+        return ImmutableSet.copyOf(preGroupedSymbols).equals(ImmutableSet.copyOf(groupingSets.getGroupingKeys()))
+                && groupingSets.getGroupingSetCount() == 1
+                && groupingSets.getGlobalGroupingSets().isEmpty();
     }
 
     public static GroupingSetDescriptor globalAggregation()
@@ -352,9 +355,7 @@ public class AggregationNode
             if (step.isInputRaw()) {
                 return Step.PARTIAL;
             }
-            else {
-                return Step.INTERMEDIATE;
-            }
+            return Step.INTERMEDIATE;
         }
 
         public static Step partialInput(Step step)
@@ -362,9 +363,7 @@ public class AggregationNode
             if (step.isOutputPartial()) {
                 return Step.INTERMEDIATE;
             }
-            else {
-                return Step.FINAL;
-            }
+            return Step.FINAL;
         }
     }
 

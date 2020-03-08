@@ -75,7 +75,7 @@ public class TestFunctionRegistry
     {
         Metadata metadata = createTestMetadataManager();
         boolean foundOperator = false;
-        for (SqlFunction function : listOperators(metadata)) {
+        for (FunctionMetadata function : listOperators(metadata)) {
             OperatorType operatorType = unmangleOperator(function.getSignature().getName());
             if (operatorType == OperatorType.CAST || operatorType == OperatorType.SATURATED_FLOOR_CAST) {
                 continue;
@@ -103,7 +103,7 @@ public class TestFunctionRegistry
                 .scalars(CustomFunctions.class)
                 .getFunctions()
                 .stream()
-                .filter(input -> input.getSignature().getName().equals("custom_add"))
+                .filter(input -> input.getFunctionMetadata().getSignature().getName().equals("custom_add"))
                 .collect(toImmutableList());
 
         Metadata metadata = createTestMetadataManager();
@@ -212,9 +212,9 @@ public class TestFunctionRegistry
                         functionSignature(
                                 ImmutableList.of("T1", "T2", "T3"),
                                 "boolean",
-                                ImmutableList.of(Signature.withVariadicBound("T1", "decimal"),
-                                        Signature.withVariadicBound("T2", "decimal"),
-                                        Signature.withVariadicBound("T3", "decimal"))))
+                                ImmutableList.of(Signature.withVariadicBound("T1", "row"),
+                                        Signature.withVariadicBound("T2", "row"),
+                                        Signature.withVariadicBound("T3", "row"))))
                 .forParameters(UNKNOWN, BIGINT, BIGINT)
                 .returns(functionSignature("bigint", "bigint", "bigint"));
     }
@@ -262,7 +262,7 @@ public class TestFunctionRegistry
                 .failsWithMessage("Could not choose a best candidate operator. Explicit type casts must be added.");
     }
 
-    private static List<SqlFunction> listOperators(Metadata metadata)
+    private static List<FunctionMetadata> listOperators(Metadata metadata)
     {
         Set<String> operatorNames = Arrays.stream(OperatorType.values())
                 .map(Signature::mangleOperatorName)
@@ -357,7 +357,15 @@ public class TestFunctionRegistry
             ImmutableList.Builder<SqlFunction> functions = ImmutableList.builder();
             for (SignatureBuilder functionSignature : functionSignatures) {
                 Signature signature = functionSignature.name(TEST_FUNCTION_NAME).build();
-                functions.add(new SqlScalarFunction(signature)
+                FunctionMetadata functionMetadata = new FunctionMetadata(
+                        signature,
+                        false,
+                        nCopies(signature.getArgumentTypes().size(), new FunctionArgumentDefinition(false)),
+                        false,
+                        false,
+                        "testing function that does nothing",
+                        SCALAR);
+                functions.add(new SqlScalarFunction(functionMetadata)
                 {
                     @Override
                     public ScalarFunctionImplementation specialize(BoundVariables boundVariables, int arity, Metadata metadata)
@@ -365,26 +373,7 @@ public class TestFunctionRegistry
                         return new ScalarFunctionImplementation(
                                 false,
                                 nCopies(arity, valueTypeArgumentProperty(RETURN_NULL_ON_NULL)),
-                                MethodHandles.identity(Void.class),
-                                true);
-                    }
-
-                    @Override
-                    public boolean isHidden()
-                    {
-                        return false;
-                    }
-
-                    @Override
-                    public boolean isDeterministic()
-                    {
-                        return false;
-                    }
-
-                    @Override
-                    public String getDescription()
-                    {
-                        return "testing function that does nothing";
+                                MethodHandles.identity(Void.class));
                     }
                 });
             }

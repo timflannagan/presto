@@ -2,31 +2,28 @@
 
 set -xeuo pipefail
 
-exit_code=0
+suite_exit_code=0
 
 presto-product-tests/bin/run_on_docker.sh \
     singlenode \
     -g hdfs_no_impersonation,hive_compression \
-    || exit_code=1
+    -x "${DISTRO_SKIP_GROUP}" \
+    || suite_exit_code=1
 
 presto-product-tests/bin/run_on_docker.sh \
     singlenode-kerberos-hdfs-no-impersonation \
     -g hdfs_no_impersonation \
-    || exit_code=1
+    || suite_exit_code=1
 
 presto-product-tests/bin/run_on_docker.sh \
     singlenode-hdfs-impersonation \
     -g storage_formats,cli,hdfs_impersonation \
-    || exit_code=1
+    || suite_exit_code=1
 
 presto-product-tests/bin/run_on_docker.sh \
     singlenode-kerberos-hdfs-impersonation \
     -g storage_formats,cli,hdfs_impersonation,authorization,hive_file_header \
-    || exit_code=1
+    || suite_exit_code=1
 
-presto-product-tests/bin/run_on_docker.sh \
-    singlenode-kerberos-hdfs-impersonation-cross-realm \
-    -g storage_formats,cli,hdfs_impersonation \
-    || exit_code=1
-
-exit "${exit_code}"
+echo "$0: exiting with ${suite_exit_code}"
+exit "${suite_exit_code}"

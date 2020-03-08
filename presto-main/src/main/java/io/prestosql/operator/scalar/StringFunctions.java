@@ -47,12 +47,14 @@ import static io.airlift.slice.SliceUtf8.toUpperCase;
 import static io.airlift.slice.SliceUtf8.tryGetCodePointAt;
 import static io.airlift.slice.Slices.utf8Slice;
 import static io.prestosql.spi.StandardErrorCode.INVALID_FUNCTION_ARGUMENT;
+import static io.prestosql.spi.type.Chars.byteCountWithoutTrailingSpace;
 import static io.prestosql.spi.type.Chars.padSpaces;
 import static io.prestosql.spi.type.Chars.trimTrailingSpaces;
 import static io.prestosql.spi.type.VarcharType.VARCHAR;
 import static io.prestosql.util.Failures.checkCondition;
 import static java.lang.Character.MAX_CODE_POINT;
 import static java.lang.Character.SURROGATE;
+import static java.lang.Math.abs;
 import static java.lang.Math.toIntExact;
 
 /**
@@ -102,6 +104,14 @@ public final class StringFunctions
     public static long charLength(@LiteralParameter("x") long x, @SqlType("char(x)") Slice slice)
     {
         return x;
+    }
+
+    @Description("returns length of a character string without trailing spaces")
+    @ScalarFunction(value = "$space_trimmed_length", hidden = true)
+    @SqlType(StandardTypes.BIGINT)
+    public static long spaceTrimmedLength(@SqlType("varchar") Slice slice)
+    {
+        return countCodePoints(slice, 0, byteCountWithoutTrailingSpace(slice, 0, slice.length()));
     }
 
     @Description("greedily removes occurrences of a pattern in a string")
@@ -195,15 +205,67 @@ public final class StringFunctions
     @SqlType(StandardTypes.BIGINT)
     public static long stringPosition(@SqlType("varchar(x)") Slice string, @SqlType("varchar(y)") Slice substring)
     {
+        return stringPosition(string, substring, 1);
+    }
+
+    @Description("returns index of n-th occurrence of a substring (or 0 if not found)")
+    @ScalarFunction("strpos")
+    @LiteralParameters({"x", "y"})
+    @SqlType(StandardTypes.BIGINT)
+    public static long stringPosition(@SqlType("varchar(x)") Slice string, @SqlType("varchar(y)") Slice substring, @SqlType(StandardTypes.BIGINT) long instance)
+    {
+        if (instance < 0) {
+            return stringPositionFromEnd(string, substring, abs(instance));
+        }
+        return stringPositionFromStart(string, substring, instance);
+    }
+
+    private static long stringPositionFromStart(Slice string, Slice substring, long instance)
+    {
+        if (instance <= 0) {
+            throw new PrestoException(INVALID_FUNCTION_ARGUMENT, "'instance' must be a positive or negative number.");
+        }
         if (substring.length() == 0) {
             return 1;
         }
 
-        int index = string.indexOf(substring);
-        if (index < 0) {
-            return 0;
+        int foundInstances = 0;
+        int index = -1;
+        do {
+            // step forwards through string
+            index = string.indexOf(substring, index + 1);
+            if (index < 0) {
+                return 0;
+            }
+            foundInstances++;
         }
+        while (foundInstances < instance);
+
         return countCodePoints(string, 0, index) + 1;
+    }
+
+    private static long stringPositionFromEnd(Slice string, Slice substring, long instance)
+    {
+        if (instance <= 0) {
+            throw new PrestoException(INVALID_FUNCTION_ARGUMENT, "'instance' must be a positive or negative number.");
+        }
+        if (substring.length() == 0) {
+            return 1;
+        }
+
+        int foundInstances = 0;
+        int index = string.length();
+        do {
+            // step backwards through string
+            index = string.toStringUtf8().lastIndexOf(substring.toStringUtf8(), index - 1);
+            if (index < 0) {
+                return 0;
+            }
+            foundInstances++;
+        }
+        while (foundInstances < instance);
+
+        return index + 1;
     }
 
     @Description("suffix starting at given index")

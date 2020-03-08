@@ -40,6 +40,8 @@ import io.prestosql.sql.planner.plan.GroupIdNode;
 import io.prestosql.sql.planner.plan.IndexSourceNode;
 import io.prestosql.sql.planner.plan.IntersectNode;
 import io.prestosql.sql.planner.plan.JoinNode;
+import io.prestosql.sql.planner.plan.JoinNode.EquiJoinClause;
+import io.prestosql.sql.planner.plan.JoinNode.Type;
 import io.prestosql.sql.planner.plan.LimitNode;
 import io.prestosql.sql.planner.plan.MarkDistinctNode;
 import io.prestosql.sql.planner.plan.OffsetNode;
@@ -391,25 +393,27 @@ public final class PlanMatchPattern
                 new JoinMatcher(
                         joinType,
                         expectedEquiCriteria,
-                        expectedFilter.map(predicate -> rewriteIdentifiersToSymbolReferences(new SqlParser().createExpression(predicate))),
+                        expectedFilter.map(predicate -> rewriteIdentifiersToSymbolReferences(new SqlParser().createExpression(predicate, new ParsingOptions()))),
                         expectedDistributionType,
                         expectedSpillable,
                         Optional.empty()));
     }
 
     public static PlanMatchPattern join(
-            JoinNode.Type joinType,
-            List<ExpectedValueProvider<JoinNode.EquiJoinClause>> expectedEquiCriteria,
+            Type joinType,
+            List<ExpectedValueProvider<EquiJoinClause>> expectedEquiCriteria,
             Map<String, String> expectedDynamicFilter,
             Optional<String> expectedStaticFilter,
             PlanMatchPattern leftSource,
-            PlanMatchPattern right)
+            PlanMatchPattern right,
+            Metadata metadata)
     {
         Map<SymbolAlias, SymbolAlias> expectedDynamicFilterAliases = expectedDynamicFilter.entrySet().stream()
                 .collect(toImmutableMap(entry -> new SymbolAlias(entry.getKey()), entry -> new SymbolAlias(entry.getValue())));
         DynamicFilterMatcher dynamicFilterMatcher = new DynamicFilterMatcher(
+                metadata,
                 expectedDynamicFilterAliases,
-                expectedStaticFilter.map(predicate -> rewriteIdentifiersToSymbolReferences(new SqlParser().createExpression(predicate))));
+                expectedStaticFilter.map(predicate -> rewriteIdentifiersToSymbolReferences(new SqlParser().createExpression(predicate, new ParsingOptions()))));
         JoinMatcher joinMatcher = new JoinMatcher(
                 joinType,
                 expectedEquiCriteria,
@@ -456,8 +460,13 @@ public final class PlanMatchPattern
 
     public static PlanMatchPattern exchange(ExchangeNode.Scope scope, ExchangeNode.Type type, List<Ordering> orderBy, PlanMatchPattern... sources)
     {
+        return exchange(scope, type, orderBy, ImmutableSet.of(), sources);
+    }
+
+    public static PlanMatchPattern exchange(ExchangeNode.Scope scope, ExchangeNode.Type type, List<Ordering> orderBy, Set<String> partitionedBy, PlanMatchPattern... sources)
+    {
         return node(ExchangeNode.class, sources)
-                .with(new ExchangeMatcher(scope, type, orderBy));
+                .with(new ExchangeMatcher(scope, type, orderBy, partitionedBy));
     }
 
     public static PlanMatchPattern union(PlanMatchPattern... sources)
@@ -493,7 +502,7 @@ public final class PlanMatchPattern
 
     public static PlanMatchPattern filter(String expectedPredicate, PlanMatchPattern source)
     {
-        return filter(rewriteIdentifiersToSymbolReferences(new SqlParser().createExpression(expectedPredicate)), source);
+        return filter(rewriteIdentifiersToSymbolReferences(new SqlParser().createExpression(expectedPredicate, new ParsingOptions())), source);
     }
 
     public static PlanMatchPattern filter(Expression expectedPredicate, PlanMatchPattern source)

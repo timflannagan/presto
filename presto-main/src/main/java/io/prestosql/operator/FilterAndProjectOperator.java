@@ -142,12 +142,12 @@ public class FilterAndProjectOperator
         }
 
         @Override
-        public AdapterWorkProcessorOperator create(Session session, MemoryTrackingContext memoryTrackingContext, DriverYieldSignal yieldSignal)
+        public AdapterWorkProcessorOperator create(ProcessorContext processorContext)
         {
             return new FilterAndProjectOperator(
-                    session,
-                    memoryTrackingContext,
-                    yieldSignal,
+                    processorContext.getSession(),
+                    processorContext.getMemoryTrackingContext(),
+                    processorContext.getDriverYieldSignal(),
                     Optional.empty(),
                     processor.get(),
                     types,
@@ -174,12 +174,12 @@ public class FilterAndProjectOperator
         }
 
         @Override
-        public WorkProcessorOperator create(Session session, MemoryTrackingContext memoryTrackingContext, DriverYieldSignal yieldSignal, WorkProcessor<Page> sourcePages)
+        public WorkProcessorOperator create(ProcessorContext processorContext, WorkProcessor<Page> sourcePages)
         {
             return new FilterAndProjectOperator(
-                    session,
-                    memoryTrackingContext,
-                    yieldSignal,
+                    processorContext.getSession(),
+                    processorContext.getMemoryTrackingContext(),
+                    processorContext.getDriverYieldSignal(),
                     Optional.of(sourcePages),
                     processor.get(),
                     types,

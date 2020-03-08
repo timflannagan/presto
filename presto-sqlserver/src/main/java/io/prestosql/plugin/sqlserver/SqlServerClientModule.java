@@ -14,6 +14,7 @@
 package io.prestosql.plugin.sqlserver;
 
 import com.google.inject.Binder;
+import com.google.inject.Key;
 import com.google.inject.Module;
 import com.google.inject.Provides;
 import com.google.inject.Scopes;
@@ -22,7 +23,9 @@ import com.microsoft.sqlserver.jdbc.SQLServerDriver;
 import io.prestosql.plugin.jdbc.BaseJdbcConfig;
 import io.prestosql.plugin.jdbc.ConnectionFactory;
 import io.prestosql.plugin.jdbc.DriverConnectionFactory;
+import io.prestosql.plugin.jdbc.ForBaseJdbc;
 import io.prestosql.plugin.jdbc.JdbcClient;
+import io.prestosql.plugin.jdbc.TypeHandlingJdbcConfig;
 import io.prestosql.plugin.jdbc.credential.CredentialProvider;
 
 import static io.airlift.configuration.ConfigBinder.configBinder;
@@ -33,12 +36,15 @@ public class SqlServerClientModule
     @Override
     public void configure(Binder binder)
     {
-        binder.bind(JdbcClient.class).to(SqlServerClient.class).in(Scopes.SINGLETON);
+        binder.bind(Key.get(JdbcClient.class, ForBaseJdbc.class))
+                .to(SqlServerClient.class).in(Scopes.SINGLETON);
         configBinder(binder).bindConfig(BaseJdbcConfig.class);
+        configBinder(binder).bindConfig(TypeHandlingJdbcConfig.class);
     }
 
     @Provides
     @Singleton
+    @ForBaseJdbc
     public ConnectionFactory getConnectionFactory(BaseJdbcConfig config, CredentialProvider credentialProvider)
     {
         return new DriverConnectionFactory(new SQLServerDriver(), config, credentialProvider);

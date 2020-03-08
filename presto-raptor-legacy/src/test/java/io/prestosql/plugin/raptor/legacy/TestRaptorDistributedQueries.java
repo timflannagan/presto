@@ -14,22 +14,19 @@
 package io.prestosql.plugin.raptor.legacy;
 
 import com.google.common.collect.ImmutableMap;
-import io.prestosql.tests.AbstractTestDistributedQueries;
+import io.prestosql.testing.AbstractTestDistributedQueries;
+import io.prestosql.testing.QueryRunner;
 
 import static io.prestosql.plugin.raptor.legacy.RaptorQueryRunner.createRaptorQueryRunner;
 
 public class TestRaptorDistributedQueries
         extends AbstractTestDistributedQueries
 {
-    @SuppressWarnings("unused")
-    public TestRaptorDistributedQueries()
+    @Override
+    protected QueryRunner createQueryRunner()
+            throws Exception
     {
-        this(() -> createRaptorQueryRunner(ImmutableMap.of(), true, false));
-    }
-
-    protected TestRaptorDistributedQueries(QueryRunnerSupplier supplier)
-    {
-        super(supplier);
+        return createRaptorQueryRunner(ImmutableMap.of(), true, false);
     }
 
     @Override
@@ -37,5 +34,11 @@ public class TestRaptorDistributedQueries
     {
         // Raptor connector currently does not support comment on table
         assertQueryFails("COMMENT ON TABLE orders IS 'hello'", "This connector does not support setting table comments");
+    }
+
+    @Override
+    public void testInsertWithCoercion()
+    {
+        // No support for char type
     }
 }

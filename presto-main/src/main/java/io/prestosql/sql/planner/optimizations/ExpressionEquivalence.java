@@ -23,6 +23,8 @@ import io.prestosql.Session;
 import io.prestosql.metadata.Metadata;
 import io.prestosql.metadata.ResolvedFunction;
 import io.prestosql.spi.type.Type;
+import io.prestosql.sql.planner.DesugarArrayConstructorRewriter;
+import io.prestosql.sql.planner.DesugarLikeRewriter;
 import io.prestosql.sql.planner.Symbol;
 import io.prestosql.sql.planner.TypeAnalyzer;
 import io.prestosql.sql.planner.TypeProvider;
@@ -46,7 +48,6 @@ import java.util.Set;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.collect.ImmutableList.toImmutableList;
-import static io.prestosql.metadata.FunctionKind.SCALAR;
 import static io.prestosql.metadata.Signature.mangleOperatorName;
 import static io.prestosql.spi.function.OperatorType.EQUAL;
 import static io.prestosql.spi.function.OperatorType.GREATER_THAN;
@@ -95,9 +96,11 @@ public class ExpressionEquivalence
 
     private RowExpression toRowExpression(Session session, Expression expression, Map<Symbol, Integer> symbolInput, TypeProvider types)
     {
+        expression = DesugarLikeRewriter.rewrite(expression, session, metadata, typeAnalyzer, types);
+        expression = DesugarArrayConstructorRewriter.rewrite(expression, session, metadata, typeAnalyzer, types);
+
         return translate(
                 expression,
-                SCALAR,
                 typeAnalyzer.getTypes(session, types, expression),
                 symbolInput,
                 metadata,

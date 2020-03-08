@@ -70,14 +70,14 @@ public class TestAccessControlManager
     @Test(expectedExceptions = PrestoException.class, expectedExceptionsMessageRegExp = "Presto server is still initializing")
     public void testInitializing()
     {
-        AccessControlManager accessControlManager = new AccessControlManager(createTestTransactionManager());
+        AccessControlManager accessControlManager = new AccessControlManager(createTestTransactionManager(), new AccessControlConfig());
         accessControlManager.checkCanSetUser(Optional.empty(), "foo");
     }
 
     @Test
     public void testNoneSystemAccessControl()
     {
-        AccessControlManager accessControlManager = new AccessControlManager(createTestTransactionManager());
+        AccessControlManager accessControlManager = new AccessControlManager(createTestTransactionManager(), new AccessControlConfig());
         accessControlManager.setSystemAccessControl(AllowAllSystemAccessControl.NAME, ImmutableMap.of());
         accessControlManager.checkCanSetUser(Optional.empty(), USER_NAME);
     }
@@ -88,7 +88,7 @@ public class TestAccessControlManager
         Identity identity = Identity.forUser(USER_NAME).withPrincipal(PRINCIPAL).build();
         QualifiedObjectName tableName = new QualifiedObjectName("catalog", "schema", "table");
         TransactionManager transactionManager = createTestTransactionManager();
-        AccessControlManager accessControlManager = new AccessControlManager(transactionManager);
+        AccessControlManager accessControlManager = new AccessControlManager(transactionManager, new AccessControlConfig());
 
         accessControlManager.setSystemAccessControl(ReadOnlySystemAccessControl.NAME, ImmutableMap.of());
         accessControlManager.checkCanSetUser(Optional.of(PRINCIPAL), USER_NAME);
@@ -97,7 +97,7 @@ public class TestAccessControlManager
         transaction(transactionManager, accessControlManager)
                 .execute(transactionId -> {
                     SecurityContext context = new SecurityContext(transactionId, identity);
-                    accessControlManager.checkCanSetCatalogSessionProperty(transactionId, identity, "catalog", "property");
+                    accessControlManager.checkCanSetCatalogSessionProperty(context, "catalog", "property");
                     accessControlManager.checkCanShowSchemas(context, "catalog");
                     accessControlManager.checkCanShowTablesMetadata(context, new CatalogSchemaName("catalog", "schema"));
                     accessControlManager.checkCanSelectFromColumns(context, tableName, ImmutableSet.of("column"));
@@ -124,7 +124,7 @@ public class TestAccessControlManager
     @Test
     public void testSetAccessControl()
     {
-        AccessControlManager accessControlManager = new AccessControlManager(createTestTransactionManager());
+        AccessControlManager accessControlManager = new AccessControlManager(createTestTransactionManager(), new AccessControlConfig());
 
         TestSystemAccessControlFactory accessControlFactory = new TestSystemAccessControlFactory("test");
         accessControlManager.addSystemAccessControlFactory(accessControlFactory);
@@ -139,7 +139,7 @@ public class TestAccessControlManager
     public void testNoCatalogAccessControl()
     {
         TransactionManager transactionManager = createTestTransactionManager();
-        AccessControlManager accessControlManager = new AccessControlManager(transactionManager);
+        AccessControlManager accessControlManager = new AccessControlManager(transactionManager, new AccessControlConfig());
 
         TestSystemAccessControlFactory accessControlFactory = new TestSystemAccessControlFactory("test");
         accessControlManager.addSystemAccessControlFactory(accessControlFactory);
@@ -156,7 +156,7 @@ public class TestAccessControlManager
     {
         CatalogManager catalogManager = new CatalogManager();
         TransactionManager transactionManager = createTestTransactionManager(catalogManager);
-        AccessControlManager accessControlManager = new AccessControlManager(transactionManager);
+        AccessControlManager accessControlManager = new AccessControlManager(transactionManager, new AccessControlConfig());
 
         TestSystemAccessControlFactory accessControlFactory = new TestSystemAccessControlFactory("test");
         accessControlManager.addSystemAccessControlFactory(accessControlFactory);
@@ -182,7 +182,7 @@ public class TestAccessControlManager
     {
         CatalogManager catalogManager = new CatalogManager();
         TransactionManager transactionManager = createTestTransactionManager(catalogManager);
-        AccessControlManager accessControlManager = new AccessControlManager(transactionManager);
+        AccessControlManager accessControlManager = new AccessControlManager(transactionManager, new AccessControlConfig());
 
         TestSystemAccessControlFactory accessControlFactory = new TestSystemAccessControlFactory("test");
         accessControlManager.addSystemAccessControlFactory(accessControlFactory);
@@ -379,6 +379,12 @@ public class TestAccessControlManager
 
         @Override
         public void checkCanCreateView(ConnectorSecurityContext context, SchemaTableName viewName)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void checkCanRenameView(ConnectorSecurityContext context, SchemaTableName viewName, SchemaTableName newViewName)
         {
             throw new UnsupportedOperationException();
         }

@@ -134,7 +134,6 @@ import io.prestosql.split.MappedRecordSet;
 import io.prestosql.split.PageSinkManager;
 import io.prestosql.split.PageSourceProvider;
 import io.prestosql.sql.DynamicFilters;
-import io.prestosql.sql.ExpressionUtils;
 import io.prestosql.sql.gen.ExpressionCompiler;
 import io.prestosql.sql.gen.JoinCompiler;
 import io.prestosql.sql.gen.JoinFilterFunctionCompiler;
@@ -236,10 +235,10 @@ import static io.prestosql.SystemSessionProperties.getTaskConcurrency;
 import static io.prestosql.SystemSessionProperties.getTaskWriterCount;
 import static io.prestosql.SystemSessionProperties.isEnableDynamicFiltering;
 import static io.prestosql.SystemSessionProperties.isExchangeCompressionEnabled;
+import static io.prestosql.SystemSessionProperties.isLateMaterializationEnabled;
 import static io.prestosql.SystemSessionProperties.isSpillEnabled;
 import static io.prestosql.SystemSessionProperties.isSpillOrderBy;
 import static io.prestosql.SystemSessionProperties.isSpillWindowOperator;
-import static io.prestosql.metadata.FunctionKind.SCALAR;
 import static io.prestosql.operator.DistinctLimitOperator.DistinctLimitOperatorFactory;
 import static io.prestosql.operator.NestedLoopBuildOperator.NestedLoopBuildOperatorFactory;
 import static io.prestosql.operator.NestedLoopJoinOperator.NestedLoopJoinOperatorFactory;
@@ -257,9 +256,10 @@ import static io.prestosql.spi.StandardErrorCode.COMPILER_ERROR;
 import static io.prestosql.spi.type.BigintType.BIGINT;
 import static io.prestosql.spi.type.TypeUtils.writeNativeValue;
 import static io.prestosql.spiller.PartitioningSpillerFactory.unsupportedPartitioningSpillerFactory;
-import static io.prestosql.sql.DynamicFilters.extractDynamicFilters;
+import static io.prestosql.sql.ExpressionUtils.combineConjuncts;
 import static io.prestosql.sql.gen.LambdaBytecodeGenerator.compileLambdaProvider;
 import static io.prestosql.sql.planner.ExpressionNodeInliner.replaceExpression;
+import static io.prestosql.sql.planner.SortExpressionExtractor.extractSortExpression;
 import static io.prestosql.sql.planner.SystemPartitioningHandle.COORDINATOR_DISTRIBUTION;
 import static io.prestosql.sql.planner.SystemPartitioningHandle.FIXED_ARBITRARY_DISTRIBUTION;
 import static io.prestosql.sql.planner.SystemPartitioningHandle.FIXED_BROADCAST_DISTRIBUTION;
@@ -575,7 +575,7 @@ public class LocalExecutionPlanner
                 }
             }
 
-            if (SystemSessionProperties.isWorkProcessorPipelines(taskContext.getSession())) {
+            if (isLateMaterializationEnabled(taskContext.getSession())) {
                 operatorFactories = WorkProcessorPipelineSourceOperator.convertOperators(getNextOperatorId(), operatorFactories);
             }
 
@@ -634,7 +634,7 @@ public class LocalExecutionPlanner
 
         public LocalExecutionPlanContext createSubContext()
         {
-            checkState(!indexSourceContext.isPresent(), "index build plan can not have sub-contexts");
+            checkState(!indexSourceContext.isPresent(), "index build plan cannot have sub-contexts");
             return new LocalExecutionPlanContext(taskContext, types, driverFactories, indexSourceContext, dynamicFiltersCollector, nextPipelineId);
         }
 
@@ -1235,14 +1235,14 @@ public class LocalExecutionPlanner
             }
             Map<Symbol, Integer> outputMappings = outputMappingsBuilder.build();
 
-            Optional<DynamicFilters.ExtractResult> extractDynamicFilterResult = filterExpression.map(expression -> extractDynamicFilters(metadata, expression));
+            Optional<DynamicFilters.ExtractResult> extractDynamicFilterResult = filterExpression.map(DynamicFilters::extractDynamicFilters);
             Optional<Expression> staticFilters = extractDynamicFilterResult
                     .map(DynamicFilters.ExtractResult::getStaticConjuncts)
-                    .map(ExpressionUtils::combineConjuncts);
+                    .map(filter -> combineConjuncts(metadata, filter));
 
             // TODO: Execution must be plugged in here
             Optional<List<DynamicFilters.Descriptor>> dynamicFilters = extractDynamicFilterResult.map(DynamicFilters.ExtractResult::getDynamicConjuncts);
-            Supplier<TupleDomain<ColumnHandle>> dynamicFilterSupplier = null;
+            Supplier<TupleDomain<ColumnHandle>> dynamicFilterSupplier = TupleDomain::all;
             if (dynamicFilters.isPresent() && !dynamicFilters.get().isEmpty()) {
                 log.debug("[TableScan] Dynamic filters: %s", dynamicFilters);
                 if (sourceNode instanceof TableScanNode) {
@@ -1312,7 +1312,7 @@ public class LocalExecutionPlanner
 
         private RowExpression toRowExpression(Expression expression, Map<NodeRef<Expression>, Type> types, Map<Symbol, Integer> layout)
         {
-            return SqlToRowExpressionTranslator.translate(expression, SCALAR, types, layout, metadata, session, true);
+            return SqlToRowExpressionTranslator.translate(expression, types, layout, metadata, session, true);
         }
 
         @Override
@@ -1569,7 +1569,6 @@ public class LocalExecutionPlanner
                     indexOutputChannels,
                     indexHashChannel,
                     indexSource.getTypes(),
-                    indexSource.getLayout(),
                     indexBuildDriverFactoryProvider,
                     maxIndexMemorySize,
                     indexJoinLookupStats,
@@ -1583,7 +1582,10 @@ public class LocalExecutionPlanner
                     false,
                     UNGROUPED_EXECUTION,
                     UNGROUPED_EXECUTION,
-                    lifespan -> indexLookupSourceFactory,
+                    lifespan -> {
+                        indexLookupSourceFactory.setTaskContext(context.taskContext);
+                        return indexLookupSourceFactory;
+                    },
                     indexLookupSourceFactory.getOutputTypes());
 
             ImmutableMap.Builder<Symbol, Integer> outputMappings = ImmutableMap.builder();
@@ -1620,11 +1622,6 @@ public class LocalExecutionPlanner
             }
 
             List<JoinNode.EquiJoinClause> clauses = node.getCriteria();
-
-            // TODO: Execution must be plugged in here
-            if (!node.getDynamicFilters().isEmpty()) {
-                log.debug("[Join] Dynamic filters: %s", node.getDynamicFilters());
-            }
 
             List<Symbol> leftSymbols = Lists.transform(clauses, JoinNode.EquiJoinClause::getLeft);
             List<Symbol> rightSymbols = Lists.transform(clauses, JoinNode.EquiJoinClause::getRight);
@@ -1739,28 +1736,22 @@ public class LocalExecutionPlanner
                     if (probeFirst) {
                         return (buildGeometry, probeGeometry, radius) -> probeGeometry.contains(buildGeometry);
                     }
-                    else {
-                        return (buildGeometry, probeGeometry, radius) -> buildGeometry.contains(probeGeometry);
-                    }
+                    return (buildGeometry, probeGeometry, radius) -> buildGeometry.contains(probeGeometry);
                 case ST_WITHIN:
                     if (probeFirst) {
                         return (buildGeometry, probeGeometry, radius) -> probeGeometry.within(buildGeometry);
                     }
-                    else {
-                        return (buildGeometry, probeGeometry, radius) -> buildGeometry.within(probeGeometry);
-                    }
+                    return (buildGeometry, probeGeometry, radius) -> buildGeometry.within(probeGeometry);
                 case ST_INTERSECTS:
                     return (buildGeometry, probeGeometry, radius) -> buildGeometry.intersects(probeGeometry);
                 case ST_DISTANCE:
                     if (comparisonOperator.get() == LESS_THAN) {
                         return (buildGeometry, probeGeometry, radius) -> buildGeometry.distance(probeGeometry) < radius.getAsDouble();
                     }
-                    else if (comparisonOperator.get() == LESS_THAN_OR_EQUAL) {
+                    if (comparisonOperator.get() == LESS_THAN_OR_EQUAL) {
                         return (buildGeometry, probeGeometry, radius) -> buildGeometry.distance(probeGeometry) <= radius.getAsDouble();
                     }
-                    else {
-                        throw new UnsupportedOperationException("Unsupported comparison operator: " + comparisonOperator.get());
-                    }
+                    throw new UnsupportedOperationException("Unsupported comparison operator: " + comparisonOperator.get());
                 default:
                     throw new UnsupportedOperationException("Unsupported spatial function: " + functionName);
             }
@@ -1855,7 +1846,8 @@ public class LocalExecutionPlanner
             return new PhysicalOperation(operator, outputMappings.build(), context, probeSource);
         }
 
-        private OperatorFactory createSpatialLookupJoin(SpatialJoinNode node,
+        private OperatorFactory createSpatialLookupJoin(
+                SpatialJoinNode node,
                 PlanNode probeNode,
                 PhysicalOperation probeSource,
                 Symbol probeSymbol,
@@ -1941,7 +1933,8 @@ public class LocalExecutionPlanner
             return builderOperatorFactory.getPagesSpatialIndexFactory();
         }
 
-        private PhysicalOperation createLookupJoin(JoinNode node,
+        private PhysicalOperation createLookupJoin(
+                JoinNode node,
                 PlanNode probeNode,
                 List<Symbol> probeSymbols,
                 Optional<Symbol> probeHashSymbol,
@@ -2007,7 +2000,8 @@ public class LocalExecutionPlanner
                             context.getTypes(),
                             context.getSession()));
 
-            Optional<SortExpressionContext> sortExpressionContext = node.getSortExpressionContext();
+            Optional<SortExpressionContext> sortExpressionContext = node.getFilter()
+                    .flatMap(filter -> extractSortExpression(metadata, ImmutableSet.copyOf(node.getRight().getOutputSymbols()), filter));
 
             Optional<Integer> sortChannel = sortExpressionContext
                     .map(SortExpressionContext::getSortExpression)
@@ -2040,7 +2034,6 @@ public class LocalExecutionPlanner
                                     .map(buildSource.getTypes()::get)
                                     .collect(toImmutableList()),
                             partitionCount,
-                            buildSource.getLayout(),
                             buildOuter),
                     buildOutputTypes);
 
@@ -2108,9 +2101,10 @@ public class LocalExecutionPlanner
             if (node.getDynamicFilters().isEmpty()) {
                 return Optional.empty();
             }
+            log.debug("[Join] Dynamic filters: %s", node.getDynamicFilters());
             LocalDynamicFiltersCollector collector = context.getDynamicFiltersCollector();
             return LocalDynamicFilter
-                    .create(metadata, node, partitionCount)
+                    .create(node, partitionCount)
                     .map(filter -> {
                         // Intersect dynamic filters' predicates when they become ready,
                         // in order to support multiple join nodes in the same plan fragment.

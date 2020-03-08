@@ -316,7 +316,7 @@ public final class Session
 
             for (Entry<String, String> property : catalogProperties.entrySet()) {
                 // verify permissions
-                accessControl.checkCanSetCatalogSessionProperty(transactionId, identity, catalogName, property.getKey());
+                accessControl.checkCanSetCatalogSessionProperty(new SecurityContext(transactionId, identity), catalogName, property.getKey());
 
                 // validate session property value
                 sessionPropertyManager.validateCatalogSessionProperty(catalog, catalogName, property.getKey(), property.getValue());
@@ -332,7 +332,7 @@ public final class Session
                     .orElseThrow(() -> new PrestoException(NOT_FOUND, "Catalog does not exist: " + catalogName))
                     .getCatalogName();
             if (role.getType() == SelectedRole.Type.ROLE) {
-                accessControl.checkCanSetRole(transactionId, identity, role.getRole().get(), catalogName);
+                accessControl.checkCanSetRole(new SecurityContext(transactionId, identity), role.getRole().get(), catalogName);
             }
             roles.put(catalog.getCatalogName(), role);
 
@@ -767,7 +767,10 @@ public final class Session
 
         public ResourceEstimates build()
         {
-            return new ResourceEstimates(executionTime, cpuTime, peakMemory);
+            return new ResourceEstimates(
+                    executionTime.map(Duration::toMillis).map(java.time.Duration::ofMillis),
+                    cpuTime.map(Duration::toMillis).map(java.time.Duration::ofMillis),
+                    peakMemory.map(DataSize::toBytes));
         }
     }
 }

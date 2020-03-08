@@ -30,24 +30,19 @@ import static io.airlift.json.JsonBinder.jsonBinder;
 import static io.airlift.json.JsonCodecBinder.jsonCodecBinder;
 import static java.util.Objects.requireNonNull;
 
-/**
- * Guice module for the Apache Kafka connector.
- */
 public class KafkaConnectorModule
         implements Module
 {
     @Override
     public void configure(Binder binder)
     {
-        binder.bind(KafkaConnector.class).in(Scopes.SINGLETON);
-
         binder.bind(KafkaMetadata.class).in(Scopes.SINGLETON);
         binder.bind(KafkaSplitManager.class).in(Scopes.SINGLETON);
         binder.bind(KafkaRecordSetProvider.class).in(Scopes.SINGLETON);
 
-        binder.bind(KafkaSimpleConsumerManager.class).in(Scopes.SINGLETON);
+        binder.bind(KafkaConsumerFactory.class).in(Scopes.SINGLETON);
 
-        configBinder(binder).bindConfig(KafkaConnectorConfig.class);
+        configBinder(binder).bindConfig(KafkaConfig.class);
 
         jsonBinder(binder).addDeserializerBinding(Type.class).to(TypeDeserializer.class);
         jsonCodecBinder(binder).bindJsonCodec(KafkaTopicDescription.class);
@@ -55,7 +50,7 @@ public class KafkaConnectorModule
         binder.install(new DecoderModule());
     }
 
-    public static final class TypeDeserializer
+    private static final class TypeDeserializer
             extends FromStringDeserializer<Type>
     {
         private static final long serialVersionUID = 1L;

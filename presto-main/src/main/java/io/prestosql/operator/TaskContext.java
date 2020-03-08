@@ -119,7 +119,8 @@ public class TaskContext
         return taskContext;
     }
 
-    private TaskContext(QueryContext queryContext,
+    private TaskContext(
+            QueryContext queryContext,
             TaskStateMachine taskStateMachine,
             GcMonitor gcMonitor,
             Executor notificationExecutor,
@@ -463,7 +464,7 @@ public class TaskContext
             elapsedTime = new Duration(endNanos - createNanos, NANOSECONDS);
         }
         else {
-            elapsedTime = new Duration(0, NANOSECONDS);
+            elapsedTime = new Duration(System.nanoTime() - createNanos, NANOSECONDS);
         }
 
         int fullGcCount = getFullGcCount();

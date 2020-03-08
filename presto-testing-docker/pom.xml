@@ -3,9 +3,9 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <artifactId>presto-root</artifactId>
         <groupId>io.prestosql</groupId>
-        <version>322</version>
+        <artifactId>presto-root</artifactId>
+        <version>328</version>
     </parent>
 
     <artifactId>presto-testing-docker</artifactId>

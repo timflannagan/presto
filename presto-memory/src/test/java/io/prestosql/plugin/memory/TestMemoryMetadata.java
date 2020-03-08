@@ -32,10 +32,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import static io.airlift.testing.Assertions.assertEqualsIgnoreOrder;
 import static io.prestosql.spi.StandardErrorCode.ALREADY_EXISTS;
 import static io.prestosql.spi.StandardErrorCode.NOT_FOUND;
 import static io.prestosql.spi.type.BigintType.BIGINT;
+import static io.prestosql.testing.QueryAssertions.assertEqualsIgnoreOrder;
 import static io.prestosql.testing.TestingConnectorSession.SESSION;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.testng.Assert.assertEquals;
@@ -202,6 +202,7 @@ public class TestMemoryMetadata
     {
         SchemaTableName test1 = new SchemaTableName("test", "test_view1");
         SchemaTableName test2 = new SchemaTableName("test", "test_view2");
+        SchemaTableName test3 = new SchemaTableName("test", "test_view3");
 
         // create schema
         metadata.createSchema(SESSION, "test", ImmutableMap.of());
@@ -243,8 +244,14 @@ public class TestMemoryMetadata
         assertThat(metadata.getViews(SESSION, Optional.of("test")))
                 .containsOnlyKeys(test2);
 
+        // rename second view
+        metadata.renameView(SESSION, test2, test3);
+
+        assertThat(metadata.getViews(SESSION, Optional.of("test")))
+                .containsOnlyKeys(test3);
+
         // drop second view
-        metadata.dropView(SESSION, test2);
+        metadata.dropView(SESSION, test3);
 
         assertThat(metadata.getViews(SESSION, Optional.of("test")))
                 .isEmpty();

@@ -18,11 +18,13 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 import io.prestosql.spi.function.OperatorType;
 import io.prestosql.spi.type.TypeSignature;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static com.google.common.base.Preconditions.checkArgument;
@@ -34,7 +36,6 @@ public class Signature
     private static final String OPERATOR_PREFIX = "$operator$";
 
     private final String name;
-    private final FunctionKind kind;
     private final List<TypeVariableConstraint> typeVariableConstraints;
     private final List<LongVariableConstraint> longVariableConstraints;
     private final TypeSignature returnType;
@@ -44,7 +45,6 @@ public class Signature
     @JsonCreator
     public Signature(
             @JsonProperty("name") String name,
-            @JsonProperty("kind") FunctionKind kind,
             @JsonProperty("typeVariableConstraints") List<TypeVariableConstraint> typeVariableConstraints,
             @JsonProperty("longVariableConstraints") List<LongVariableConstraint> longVariableConstraints,
             @JsonProperty("returnType") TypeSignature returnType,
@@ -56,7 +56,6 @@ public class Signature
         requireNonNull(longVariableConstraints, "longVariableConstraints is null");
 
         this.name = name;
-        this.kind = requireNonNull(kind, "type is null");
         this.typeVariableConstraints = ImmutableList.copyOf(typeVariableConstraints);
         this.longVariableConstraints = ImmutableList.copyOf(longVariableConstraints);
         this.returnType = requireNonNull(returnType, "returnType is null");
@@ -66,12 +65,12 @@ public class Signature
 
     public Signature(String name, FunctionKind kind, TypeSignature returnType, TypeSignature... argumentTypes)
     {
-        this(name, kind, returnType, ImmutableList.copyOf(argumentTypes));
+        this(name, returnType, ImmutableList.copyOf(argumentTypes));
     }
 
-    public Signature(String name, FunctionKind kind, TypeSignature returnType, List<TypeSignature> argumentTypes)
+    public Signature(String name, TypeSignature returnType, List<TypeSignature> argumentTypes)
     {
-        this(name, kind, ImmutableList.of(), ImmutableList.of(), returnType, argumentTypes, false);
+        this(name, ImmutableList.of(), ImmutableList.of(), returnType, argumentTypes, false);
     }
 
     public static String mangleOperatorName(OperatorType operatorType)
@@ -86,21 +85,10 @@ public class Signature
         return OperatorType.valueOf(mangledName.substring(OPERATOR_PREFIX.length()));
     }
 
-    public Signature withAlias(String name)
-    {
-        return new Signature(name, kind, typeVariableConstraints, longVariableConstraints, getReturnType(), getArgumentTypes(), variableArity);
-    }
-
     @JsonProperty
     public String getName()
     {
         return name;
-    }
-
-    @JsonProperty
-    public FunctionKind getKind()
-    {
-        return kind;
     }
 
     @JsonProperty
@@ -136,7 +124,7 @@ public class Signature
     @Override
     public int hashCode()
     {
-        return Objects.hash(name, kind, typeVariableConstraints, longVariableConstraints, returnType, argumentTypes, variableArity);
+        return Objects.hash(name, typeVariableConstraints, longVariableConstraints, returnType, argumentTypes, variableArity);
     }
 
     @Override
@@ -150,7 +138,6 @@ public class Signature
         }
         Signature other = (Signature) obj;
         return Objects.equals(this.name, other.name) &&
-                Objects.equals(this.kind, other.kind) &&
                 Objects.equals(this.typeVariableConstraints, other.typeVariableConstraints) &&
                 Objects.equals(this.longVariableConstraints, other.longVariableConstraints) &&
                 Objects.equals(this.returnType, other.returnType) &&
@@ -174,32 +161,52 @@ public class Signature
      */
     public static TypeVariableConstraint withVariadicBound(String name, String variadicBound)
     {
-        return new TypeVariableConstraint(name, false, false, variadicBound);
+        return new TypeVariableConstraint(name, false, false, variadicBound, ImmutableSet.of(), ImmutableSet.of());
     }
 
     public static TypeVariableConstraint comparableWithVariadicBound(String name, String variadicBound)
     {
-        return new TypeVariableConstraint(name, true, false, variadicBound);
+        return new TypeVariableConstraint(name, true, false, variadicBound, ImmutableSet.of(), ImmutableSet.of());
     }
 
     public static TypeVariableConstraint typeVariable(String name)
     {
-        return new TypeVariableConstraint(name, false, false, null);
+        return new TypeVariableConstraint(name, false, false, null, ImmutableSet.of(), ImmutableSet.of());
     }
 
     public static TypeVariableConstraint comparableTypeParameter(String name)
     {
-        return new TypeVariableConstraint(name, true, false, null);
+        return new TypeVariableConstraint(name, true, false, null, ImmutableSet.of(), ImmutableSet.of());
     }
 
     public static TypeVariableConstraint orderableWithVariadicBound(String name, String variadicBound)
     {
-        return new TypeVariableConstraint(name, false, true, variadicBound);
+        return new TypeVariableConstraint(name, false, true, variadicBound, ImmutableSet.of(), ImmutableSet.of());
     }
 
     public static TypeVariableConstraint orderableTypeParameter(String name)
     {
-        return new TypeVariableConstraint(name, false, true, null);
+        return new TypeVariableConstraint(name, false, true, null, ImmutableSet.of(), ImmutableSet.of());
+    }
+
+    public static TypeVariableConstraint castableToTypeParameter(String name, TypeSignature... toType)
+    {
+        return new TypeVariableConstraint(name, false, false, null, ImmutableSet.copyOf(toType), ImmutableSet.of());
+    }
+
+    public static TypeVariableConstraint castableToTypeParameter(String name, Set<TypeSignature> toType)
+    {
+        return new TypeVariableConstraint(name, false, false, null, toType, ImmutableSet.of());
+    }
+
+    public static TypeVariableConstraint castableFromTypeParameter(String name, TypeSignature... toType)
+    {
+        return new TypeVariableConstraint(name, false, false, null, ImmutableSet.of(), ImmutableSet.copyOf(toType));
+    }
+
+    public static TypeVariableConstraint castableFromTypeParameter(String name, Set<TypeSignature> toType)
+    {
+        return new TypeVariableConstraint(name, false, false, null, ImmutableSet.of(), toType);
     }
 
     public static LongVariableConstraint longVariableExpression(String variable, String expression)

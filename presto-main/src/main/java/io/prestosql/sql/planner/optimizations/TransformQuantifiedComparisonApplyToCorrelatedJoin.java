@@ -19,7 +19,6 @@ import io.prestosql.Session;
 import io.prestosql.execution.warnings.WarningCollector;
 import io.prestosql.metadata.Metadata;
 import io.prestosql.spi.type.BigintType;
-import io.prestosql.spi.type.BooleanType;
 import io.prestosql.spi.type.Type;
 import io.prestosql.sql.ExpressionUtils;
 import io.prestosql.sql.planner.PlanNodeIdAllocator;
@@ -53,8 +52,10 @@ import java.util.function.Function;
 
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.collect.Iterables.getOnlyElement;
+import static io.prestosql.spi.type.BooleanType.BOOLEAN;
 import static io.prestosql.sql.ExpressionUtils.combineConjuncts;
 import static io.prestosql.sql.analyzer.TypeSignatureProvider.fromTypes;
+import static io.prestosql.sql.analyzer.TypeSignatureTranslator.toSqlType;
 import static io.prestosql.sql.planner.plan.AggregationNode.globalAggregation;
 import static io.prestosql.sql.planner.plan.SimplePlanRewriter.rewriteWith;
 import static io.prestosql.sql.tree.BooleanLiteral.FALSE_LITERAL;
@@ -193,9 +194,16 @@ public class TransformQuantifiedComparisonApplyToCorrelatedJoin
 
         public Expression rewriteUsingBounds(QuantifiedComparisonExpression quantifiedComparison, Symbol minValue, Symbol maxValue, Symbol countAllValue, Symbol countNonNullValue)
         {
-            BooleanLiteral emptySetResult = quantifiedComparison.getQuantifier().equals(ALL) ? TRUE_LITERAL : FALSE_LITERAL;
-            Function<List<Expression>, Expression> quantifier = quantifiedComparison.getQuantifier().equals(ALL) ?
-                    ExpressionUtils::combineConjuncts : ExpressionUtils::combineDisjuncts;
+            BooleanLiteral emptySetResult;
+            Function<List<Expression>, Expression> quantifier;
+            if (quantifiedComparison.getQuantifier() == ALL) {
+                emptySetResult = TRUE_LITERAL;
+                quantifier = expressions -> ExpressionUtils.combineConjuncts(metadata, expressions);
+            }
+            else {
+                emptySetResult = FALSE_LITERAL;
+                quantifier = expressions -> ExpressionUtils.combineDisjuncts(metadata, expressions);
+            }
             Expression comparisonWithExtremeValue = getBoundComparisons(quantifiedComparison, minValue, maxValue);
 
             return new SimpleCaseExpression(
@@ -209,7 +217,7 @@ public class TransformQuantifiedComparisonApplyToCorrelatedJoin
                                     ImmutableList.of(
                                             new WhenClause(
                                                     new ComparisonExpression(NOT_EQUAL, countAllValue.toSymbolReference(), countNonNullValue.toSymbolReference()),
-                                                    new Cast(new NullLiteral(), BooleanType.BOOLEAN.toString()))),
+                                                    new Cast(new NullLiteral(), toSqlType(BOOLEAN)))),
                                     Optional.of(emptySetResult))))));
         }
 
@@ -218,6 +226,7 @@ public class TransformQuantifiedComparisonApplyToCorrelatedJoin
             if (quantifiedComparison.getOperator() == EQUAL && quantifiedComparison.getQuantifier() == ALL) {
                 // A = ALL B <=> min B = max B && A = min B
                 return combineConjuncts(
+                        metadata,
                         new ComparisonExpression(EQUAL, minValue.toSymbolReference(), maxValue.toSymbolReference()),
                         new ComparisonExpression(EQUAL, quantifiedComparison.getValue(), maxValue.toSymbolReference()));
             }

@@ -16,6 +16,7 @@ package io.prestosql.memory;
 import io.airlift.configuration.Config;
 import io.airlift.configuration.ConfigDescription;
 import io.airlift.configuration.DefunctConfig;
+import io.airlift.configuration.LegacyConfig;
 import io.airlift.units.DataSize;
 
 import javax.validation.constraints.NotNull;
@@ -30,7 +31,7 @@ public class NodeMemoryConfig
     public static final String QUERY_MAX_MEMORY_PER_NODE_CONFIG = "query.max-memory-per-node";
     public static final String QUERY_MAX_TOTAL_MEMORY_PER_NODE_CONFIG = "query.max-total-memory-per-node";
 
-    private boolean isReservedPoolEnabled = true;
+    private boolean isReservedPoolDisabled = true;
 
     private DataSize maxQueryMemoryPerNode = new DataSize(AVAILABLE_HEAP_MEMORY * 0.1, BYTE);
 
@@ -51,15 +52,24 @@ public class NodeMemoryConfig
         return this;
     }
 
-    public boolean isReservedPoolEnabled()
+    @Deprecated
+    @LegacyConfig(value = "experimental.reserved-pool-enabled", replacedBy = "experimental.reserved-pool-disabled")
+    public void setReservedPoolEnabled(boolean reservedPoolEnabled)
     {
-        return isReservedPoolEnabled;
+        isReservedPoolDisabled = !reservedPoolEnabled;
     }
 
-    @Config("experimental.reserved-pool-enabled")
-    public NodeMemoryConfig setReservedPoolEnabled(boolean reservedPoolEnabled)
+    @Deprecated
+    public boolean isReservedPoolDisabled()
     {
-        isReservedPoolEnabled = reservedPoolEnabled;
+        return isReservedPoolDisabled;
+    }
+
+    @Deprecated
+    @Config("experimental.reserved-pool-disabled")
+    public NodeMemoryConfig setReservedPoolDisabled(boolean reservedPoolDisabled)
+    {
+        this.isReservedPoolDisabled = reservedPoolDisabled;
         return this;
     }
 
@@ -76,12 +86,12 @@ public class NodeMemoryConfig
         return this;
     }
 
+    @NotNull
     public DataSize getHeapHeadroom()
     {
         return heapHeadroom;
     }
 
-    @NotNull
     @Config("memory.heap-headroom-per-node")
     @ConfigDescription("The amount of heap memory to set aside as headroom/buffer (e.g., for untracked allocations)")
     public NodeMemoryConfig setHeapHeadroom(DataSize heapHeadroom)

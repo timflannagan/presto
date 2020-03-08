@@ -5,7 +5,7 @@
     <parent>
         <groupId>io.prestosql</groupId>
         <artifactId>presto-root</artifactId>
-        <version>322</version>
+        <version>328</version>
     </parent>
 
     <artifactId>presto-server-rpm</artifactId>
@@ -15,16 +15,65 @@
     <properties>
         <air.main.basedir>${project.parent.basedir}</air.main.basedir>
 
-        <air.check.skip-enforcer>true</air.check.skip-enforcer>
-        <air.check.skip-checkstyle>true</air.check.skip-checkstyle>
-        <air.check.skip-duplicate-finder>true</air.check.skip-duplicate-finder>
-        <air.check.skip-extended>true</air.check.skip-extended>
-
         <server.tar.package>presto-server-${project.version}</server.tar.package>
     </properties>
 
+    <dependencies>
+        <!-- for testing -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>io.prestosql</groupId>
+            <artifactId>presto-jdbc</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testng</groupId>
+            <artifactId>testng</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
     <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>com.mycila</groupId>
+                    <artifactId>license-maven-plugin</artifactId>
+                    <configuration>
+                        <excludes combine.children="append">
+                            <exclude>src/main/rpm/**</exclude>
+                        </excludes>
+                    </configuration>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+
         <plugins>
+            <!-- the default RPM lifecycle does not include testCompile -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>testCompile</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
             <plugin>
                 <groupId>ca.vanzyl.maven.plugins</groupId>
                 <artifactId>provisio-maven-plugin</artifactId>
@@ -41,6 +90,7 @@
                     </execution>
                 </executions>
             </plugin>
+
             <!-- Build presto-server rpm using the untarred artifacts -->
             <plugin>
                 <groupId>com.teradata</groupId>
@@ -135,7 +185,7 @@
                                 </rule>
 
                                 <rule>
-                                    <destination>/usr/lib/presto/lib/plugin</destination>
+                                    <destination>/usr/lib/presto/plugin</destination>
                                     <base>${server.tar.package}/plugin</base>
                                     <includes>
                                         <include>*/*</include>
@@ -169,7 +219,6 @@
                                 <rule>
                                     <destination>/usr/lib/presto/lib</destination>
                                 </rule>
-
                             </rules>
                         </package>
                     </packages>
@@ -177,4 +226,32 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <id>ci</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-failsafe-plugin</artifactId>
+                        <version>2.22.2</version>
+                        <configuration>
+                            <systemPropertyVariables>
+                                <rpm>${project.build.directory}/${project.build.finalName}.x86_64.rpm</rpm>
+                            </systemPropertyVariables>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <goals>
+                                    <goal>integration-test</goal>
+                                    <goal>verify</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

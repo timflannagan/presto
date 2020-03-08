@@ -17,10 +17,11 @@ import com.google.common.collect.ImmutableList;
 import io.airlift.units.Duration;
 import io.prestosql.Session;
 import io.prestosql.spi.type.Type;
+import io.prestosql.testing.AbstractTestIntegrationSmokeTest;
 import io.prestosql.testing.MaterializedResult;
 import io.prestosql.testing.MaterializedRow;
-import io.prestosql.tests.AbstractTestIntegrationSmokeTest;
-import org.testng.annotations.BeforeClass;
+import io.prestosql.testing.QueryRunner;
+import org.testng.annotations.AfterClass;
 import org.testng.annotations.Test;
 
 import java.math.BigInteger;
@@ -31,6 +32,8 @@ import java.util.List;
 
 import static com.datastax.driver.core.utils.Bytes.toRawHexString;
 import static com.google.common.primitives.Ints.toByteArray;
+import static io.airlift.tpch.TpchTable.ORDERS;
+import static io.prestosql.plugin.cassandra.CassandraQueryRunner.createCassandraQueryRunner;
 import static io.prestosql.plugin.cassandra.CassandraQueryRunner.createCassandraSession;
 import static io.prestosql.plugin.cassandra.CassandraTestingUtils.TABLE_ALL_TYPES;
 import static io.prestosql.plugin.cassandra.CassandraTestingUtils.TABLE_ALL_TYPES_INSERT;
@@ -51,14 +54,13 @@ import static io.prestosql.spi.type.VarcharType.createUnboundedVarcharType;
 import static io.prestosql.spi.type.VarcharType.createVarcharType;
 import static io.prestosql.testing.MaterializedResult.DEFAULT_PRECISION;
 import static io.prestosql.testing.MaterializedResult.resultBuilder;
-import static io.prestosql.tests.QueryAssertions.assertContains;
-import static io.prestosql.tests.QueryAssertions.assertContainsEventually;
+import static io.prestosql.testing.QueryAssertions.assertContains;
+import static io.prestosql.testing.QueryAssertions.assertContainsEventually;
 import static java.lang.String.format;
 import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.stream.Collectors.toList;
 import static org.testng.Assert.assertEquals;
 
-@Test(singleThreaded = true)
 public class TestCassandraIntegrationSmokeTest
         extends AbstractTestIntegrationSmokeTest
 {
@@ -66,21 +68,27 @@ public class TestCassandraIntegrationSmokeTest
     private static final Session SESSION = createCassandraSession(KEYSPACE);
 
     private static final Timestamp DATE_TIME_LOCAL = Timestamp.valueOf(LocalDateTime.of(1970, 1, 1, 3, 4, 5, 0));
-    // TODO should match DATE_TIME_LOCAL after https://github.com/prestodb/presto/issues/7122
+    // TODO should match DATE_TIME_LOCAL after https://github.com/prestosql/presto/issues/37
     private static final LocalDateTime TIMESTAMP_LOCAL = LocalDateTime.of(1969, 12, 31, 23, 4, 5);
 
+    private CassandraServer server;
     private CassandraSession session;
 
-    public TestCassandraIntegrationSmokeTest()
+    @Override
+    protected QueryRunner createQueryRunner()
+            throws Exception
     {
-        super(CassandraQueryRunner::createCassandraQueryRunner);
+        CassandraServer server = new CassandraServer();
+        this.server = server;
+        this.session = server.getSession();
+        createTestTables(session, KEYSPACE, DATE_TIME_LOCAL);
+        return createCassandraQueryRunner(server, ORDERS);
     }
 
-    @BeforeClass
-    public void setUp()
+    @AfterClass(alwaysRun = true)
+    public void tearDown()
     {
-        session = EmbeddedCassandra.getSession();
-        createTestTables(session, KEYSPACE, DATE_TIME_LOCAL);
+        server.close();
     }
 
     @Override
@@ -91,6 +99,18 @@ public class TestCassandraIntegrationSmokeTest
 
     @Override
     protected boolean isParameterizedVarcharSupported()
+    {
+        return false;
+    }
+
+    @Override
+    protected boolean canCreateSchema()
+    {
+        return false;
+    }
+
+    @Override
+    protected boolean canDropSchema()
     {
         return false;
     }

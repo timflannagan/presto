@@ -148,10 +148,10 @@ public class PrestoConnection
             throws SQLException
     {
         checkOpen();
-        boolean wasAutoCommit = this.autoCommit.getAndSet(autoCommit);
-        if (autoCommit && !wasAutoCommit) {
+        if (autoCommit && !getAutoCommit()) {
             commit();
         }
+        this.autoCommit.set(autoCommit);
     }
 
     @Override
@@ -170,6 +170,10 @@ public class PrestoConnection
         if (getAutoCommit()) {
             throw new SQLException("Connection is in auto-commit mode");
         }
+        if (transactionId.get() == null) {
+            // empty transaction
+            return;
+        }
         try (PrestoStatement statement = new PrestoStatement(this)) {
             statement.internalExecute("COMMIT");
         }
@@ -182,6 +186,10 @@ public class PrestoConnection
         checkOpen();
         if (getAutoCommit()) {
             throw new SQLException("Connection is in auto-commit mode");
+        }
+        if (transactionId.get() == null) {
+            // empty transaction
+            return;
         }
         try (PrestoStatement statement = new PrestoStatement(this)) {
             statement.internalExecute("ROLLBACK");
@@ -541,7 +549,7 @@ public class PrestoConnection
     }
 
     /**
-     * Adds a session property (experimental).
+     * Adds a session property.
      */
     public void setSessionProperty(String name, String value)
     {

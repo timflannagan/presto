@@ -23,6 +23,7 @@ import java.util.List;
 
 import static com.google.common.base.MoreObjects.toStringHelper;
 import static com.google.common.base.Verify.verify;
+import static io.prestosql.operator.project.PageProcessor.MAX_BATCH_SIZE;
 import static io.prestosql.spi.block.PageBuilderStatus.DEFAULT_MAX_PAGE_SIZE_IN_BYTES;
 import static java.util.Objects.requireNonNull;
 
@@ -48,7 +49,9 @@ public class LookupJoinPageBuilder
 
     public boolean isFull()
     {
-        return estimatedProbeBlockBytes + buildPageBuilder.getSizeInBytes() >= DEFAULT_MAX_PAGE_SIZE_IN_BYTES || buildPageBuilder.isFull();
+        return estimatedProbeBlockBytes + buildPageBuilder.getSizeInBytes() >= DEFAULT_MAX_PAGE_SIZE_IN_BYTES ||
+                buildPageBuilder.getPositionCount() >= MAX_BATCH_SIZE ||
+                buildPageBuilder.isFull();
     }
 
     public boolean isEmpty()
@@ -179,6 +182,7 @@ public class LookupJoinPageBuilder
         for (int index : probe.getOutputChannels()) {
             Block block = probe.getPage().getBlock(index);
             // Estimate the size of the current row
+            // TODO: improve estimation for unloaded blocks by making it similar as in PageProcessor
             estimatedProbeBlockBytes += block.getSizeInBytes() / block.getPositionCount();
         }
     }
