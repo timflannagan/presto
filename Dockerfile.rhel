@@ -1,44 +1,16 @@
-FROM rhel7:7-released AS build
+FROM registry.svc.ci.openshift.org/ocp/4.6:metering-hadoop AS build
 
-ENV PRESTO_VERSION 328.0
-ENV RH_PRESTO_PATCH_VERSION 00001
-ENV RH_PRESTO_VERSION ${PRESTO_VERSION}.0.redhat-${RH_PRESTO_PATCH_VERSION}
-ENV RH_PRESTO_BREW_DIR ${PRESTO_VERSION}.0.redhat_${RH_PRESTO_PATCH_VERSION}
-ENV PRESTO_SERVER_OUT /build/presto-server/target/presto-server-${PRESTO_VERSION}
-ENV PRESTO_CLI_OUT /build/presto-cli/target/presto-cli-${PRESTO_VERSION}-executable.jar
-ARG PRESTO_CLI_JAR_URL=http://download.eng.bos.redhat.com/brewroot/packages/io.prestosql-presto-root/${RH_PRESTO_BREW_DIR}/1/maven/io/prestosql/presto-cli/${RH_PRESTO_VERSION}/presto-cli-${RH_PRESTO_VERSION}-executable.jar
-ARG PRESTO_SERVER_URL=http://download.eng.bos.redhat.com/brewroot/packages/io.prestosql-presto-root/${RH_PRESTO_BREW_DIR}/1/maven/io/prestosql/presto-server/${RH_PRESTO_VERSION}/presto-server-${RH_PRESTO_VERSION}.tar.gz
-
+RUN mkdir /build
+COPY . /build
 RUN mkdir -p /build /build/presto-server/target /build/presto-cli/target
-RUN set -x; curl -fSLs \
-    $PRESTO_SERVER_URL \
-    -o /tmp/presto-server.tar.gz
 
-RUN set -x; tar -xvf /tmp/presto-server.tar.gz -C /tmp \
-    && mv /tmp/presto-server-${RH_PRESTO_VERSION} \
-    $PRESTO_SERVER_OUT
+COPY opt_maven_install.sh /tmp/
+RUN chmod u+x /tmp/opt_maven_install.sh && /tmp/opt_maven_install.sh $OPENSHIFT_CI
 
-RUN set -x; curl -fSLs \
-    $PRESTO_CLI_JAR_URL \
-    -o $PRESTO_CLI_OUT
-
-ENV PROMETHEUS_JMX_EXPORTER_VERSION 0.3.1
-ENV RH_PROMETHEUS_JMX_EXPORTER_PATCH_VERSION 00006
-ENV RH_PROMETHEUS_JMX_EXPORTER_VERSION ${PROMETHEUS_JMX_EXPORTER_VERSION}.redhat-${RH_PROMETHEUS_JMX_EXPORTER_PATCH_VERSION}
-ENV RH_PROMETHEUS_JMX_EXPORTER_BREW_DIR ${PROMETHEUS_JMX_EXPORTER_VERSION}.redhat_${RH_PROMETHEUS_JMX_EXPORTER_PATCH_VERSION}
-ENV PROMETHEUS_JMX_EXPORTER_OUT /build/jmx_prometheus_javaagent.jar
-ARG PROMETHEUS_JMX_EXPORTER_URL=http://download.eng.bos.redhat.com/brewroot/packages/io.prometheus.jmx-parent/${RH_PROMETHEUS_JMX_EXPORTER_BREW_DIR}/1/maven/io/prometheus/jmx/jmx_prometheus_javaagent/${RH_PROMETHEUS_JMX_EXPORTER_VERSION}/jmx_prometheus_javaagent-${RH_PROMETHEUS_JMX_EXPORTER_VERSION}.jar
-
-RUN set -x; curl -fSLs \
-    $PROMETHEUS_JMX_EXPORTER_URL \
-    -o $PROMETHEUS_JMX_EXPORTER_OUT
-
-FROM rhel7:7-released
+FROM registry.svc.ci.openshift.org/ocp/builder:rhel-8-base-openshift-4.6
 
 RUN set -x; \
     INSTALL_PKGS="openssl java-1.8.0-openjdk java-1.8.0-openjdk-devel less rsync tini faq" \
-    && yum clean all \
-    && rm -rf /var/cache/yum/* \
     && yum install --setopt=skip_missing_names_on_install=False -y $INSTALL_PKGS \
     && yum clean all \
     && rm -rf /var/cache/yum
