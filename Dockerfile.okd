@@ -1,9 +1,111 @@
 FROM fedora:28 as build
 
+RUN set -x \
+    && INSTALL_PKGS="java-1.8.0-openjdk maven" \
+    && yum clean all && rm -rf /var/cache/yum/* \
+    && yum install --setopt=skip_missing_names_on_install=False -y $INSTALL_PKGS \
+    && yum clean all \
+    && rm -rf /var/cache/yum
+
+RUN mkdir /build
+
+COPY .git /build/.git
+COPY presto-local-file /build/presto-local-file
+COPY presto-resource-group-managers /build/presto-resource-group-managers
+COPY presto-atop /build/presto-atop
+COPY presto-memory /build/presto-memory
+COPY presto-redshift /build/presto-redshift
+COPY presto-benchmark-driver /build/presto-benchmark-driver
+COPY presto-thrift-api /build/presto-thrift-api
+COPY presto-kinesis /build/presto-kinesis
+COPY presto-blackhole /build/presto-blackhole
+COPY presto-verifier /build/presto-verifier
+COPY presto-server-rpm /build/presto-server-rpm
+COPY presto-orc /build/presto-orc
+COPY presto-rcfile /build/presto-rcfile
+COPY presto-base-jdbc /build/presto-base-jdbc
+COPY presto-phoenix /build/presto-phoenix
+COPY presto-geospatial-toolkit /build/presto-geospatial-toolkit
+COPY presto-postgresql /build/presto-postgresql
+COPY presto-sqlserver /build/presto-sqlserver
+COPY presto-teradata-functions /build/presto-teradata-functions
+COPY presto-ml /build/presto-ml
+COPY presto-cassandra /build/presto-cassandra
+COPY presto-server /build/presto-server
+COPY presto-mysql /build/presto-mysql
+COPY presto-parser /build/presto-parser
+COPY presto-docs /build/presto-docs
+COPY presto-kafka /build/presto-kafka
+COPY presto-session-property-managers /build/presto-session-property-managers
+COPY presto-iceberg /build/presto-iceberg
+COPY presto-mongodb /build/presto-mongodb
+COPY presto-record-decoder /build/presto-record-decoder
+COPY presto-tpcds /build/presto-tpcds
+COPY presto-plugin-toolkit /build/presto-plugin-toolkit
+COPY presto-spi /build/presto-spi
+COPY presto-prometheus /build/presto-prometheus
+COPY presto-thrift-testing-server /build/presto-thrift-testing-server
+COPY presto-cli /build/presto-cli
+COPY presto-hive /build/presto-hive
+COPY presto-matching /build/presto-matching
+COPY presto-elasticsearch /build/presto-elasticsearch
+COPY presto-accumulo /build/presto-accumulo
+COPY presto-tests /build/presto-tests
+COPY presto-thrift /build/presto-thrift
+COPY presto-geospatial /build/presto-geospatial
+COPY presto-jmx /build/presto-jmx
+COPY presto-jdbc /build/presto-jdbc
+COPY presto-tpch /build/presto-tpch
+COPY presto-redis /build/presto-redis
+COPY presto-array /build/presto-array
+COPY presto-product-tests /build/presto-product-tests
+COPY presto-client /build/presto-client
+COPY presto-testing-server-launcher /build/presto-testing-server-launcher
+COPY presto-parquet /build/presto-parquet
+COPY presto-proxy /build/presto-proxy
+COPY presto-hive-hadoop2 /build/presto-hive-hadoop2
+COPY presto-benchto-benchmarks /build/presto-benchto-benchmarks
+COPY presto-testing-docker /build/presto-testing-docker
+COPY presto-memory-context /build/presto-memory-context
+COPY presto-benchmark /build/presto-benchmark
+COPY presto-example-http /build/presto-example-http
+COPY presto-google-sheets /build/presto-google-sheets
+COPY presto-kudu /build/presto-kudu
+COPY presto-main /build/presto-main
+COPY presto-raptor-legacy /build/presto-raptor-legacy
+COPY presto-password-authenticators /build/presto-password-authenticators
+COPY presto-testing /build/presto-testing
+COPY presto-memsql /build/presto-memsql
+COPY src /build/src
+COPY pom.xml /build/pom.xml
+
 # load Maven cache as its own layer
 RUN cd /build && mvn --batch-mode --errors de.qaware.maven:go-offline-maven-plugin:resolve-dependencies -DdownloadSources -DdownloadJavadoc -Dmaven.repo.local=.m2/repository
 
+# build presto
+RUN cd /build && mvn --batch-mode --errors -Dmaven.javadoc.skip=true -Dmaven.source.skip=true -DskipTests -DfailIfNoTests=false -Dtest=false clean package -pl '!presto-testing-docker' -Dmaven.repo.local=.m2/repository
+# Install prometheus-jmx agent
+RUN mvn --batch-mode dependency:get -Dartifact=io.prometheus.jmx:jmx_prometheus_javaagent:0.3.1:jar -Ddest=/build/jmx_prometheus_javaagent.jar
+
 FROM registry.access.redhat.com/ubi7/ubi
+
+# go get faq via static Linux binary approach
+ARG LATEST_RELEASE=0.0.6
+RUN curl -Lo /usr/local/bin/faq https://github.com/jzelinskie/faq/releases/download/$LATEST_RELEASE/faq-linux-amd64
+RUN chmod +x /usr/local/bin/faq
+
+RUN set -x \
+    && INSTALL_PKGS="java-1.8.0-openjdk java-1.8.0-openjdk-devel openssl less rsync" \
+    && yum clean all \
+    && rm -rf /var/cache/yum/* \
+    && yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm \
+    && yum install --setopt=skip_missing_names_on_install=False -y $INSTALL_PKGS \
+    && yum clean all \
+    && rm -rf /var/cache/yum
+
+ENV TINI_VERSION v0.18.0
+ADD https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini /usr/bin/tini
+RUN chmod +x /usr/bin/tini
 
 RUN mkdir -p /opt/presto
 
@@ -20,16 +122,16 @@ ENV JAVA_HOME=/etc/alternatives/jre
 
 RUN mkdir -p $PRESTO_HOME
 
+COPY --from=build /build/presto-server/target/presto-server-${PRESTO_VERSION} ${PRESTO_HOME}
+COPY --from=build /build/presto-cli/target/presto-cli-${PRESTO_VERSION}-executable.jar ${PRESTO_CLI}
+COPY --from=build /build/jmx_prometheus_javaagent.jar ${PROMETHEUS_JMX_EXPORTER}
+
 # https://docs.oracle.com/javase/7/docs/technotes/guides/net/properties.html
 # Java caches dns results forever, don't cache dns results forever:
 RUN sed -i '/networkaddress.cache.ttl/d' $JAVA_HOME/lib/security/java.security
 RUN sed -i '/networkaddress.cache.negative.ttl/d' $JAVA_HOME/lib/security/java.security
 RUN echo 'networkaddress.cache.ttl=0' >> $JAVA_HOME/lib/security/java.security
 RUN echo 'networkaddress.cache.negative.ttl=0' >> $JAVA_HOME/lib/security/java.security
-
-COPY --from=build /build/presto-server/target/presto-server-${PRESTO_VERSION} ${PRESTO_HOME}
-COPY --from=build /build/presto-cli/target/presto-cli-${PRESTO_VERSION}-executable.jar ${PRESTO_CLI}
-COPY --from=build /build/jmx_prometheus_javaagent.jar ${PROMETHEUS_JMX_EXPORTER}
 
 RUN ln $PRESTO_CLI /usr/local/bin/presto-cli && \
     chmod 755 /usr/local/bin/presto-cli

@@ -1,7 +1,22 @@
 #!/bin/bash -x
 
+set -eo pipefail
+
 # $1=OPENSHIFT_CI=true means running in CI
 if [[ "$1" == "true" ]]; then
+
+    yum -y install --setopt=skip_missing_names_on_install=False \
+      curl \
+      java-1.8.0-openjdk \
+      java-1.8.0-openjdk-devel
+
+    pushd /tmp
+    curl -o maven.tgz https://downloads.apache.org/maven/maven-3/3.3.9/binaries/apache-maven-3.3.9-bin.tar.gz
+    tar zxvf maven.tgz
+    export M2_HOME=/tmp/apache-maven-3.3.9
+    export PATH=${PATH}:${M2_HOME}/bin
+    popd
+
     # build presto
     cd /build && mvn --batch-mode --errors -Dmaven.javadoc.skip=true -Dmaven.source.skip=true -DskipTests -DfailIfNoTests=false -Dtest=false clean package -pl '!presto-testing-docker' -Dmaven.repo.local=.m2/repository
     # Install prometheus-jmx agent
