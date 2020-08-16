@@ -21,6 +21,14 @@ if [[ "$1" == "true" ]]; then
     cd /build && mvn --batch-mode --errors -Dmaven.javadoc.skip=true -Dmaven.source.skip=true -DskipTests -DfailIfNoTests=false -Dtest=false clean package -pl '!presto-testing-docker' -Dmaven.repo.local=.m2/repository
     # Install prometheus-jmx agent
     mvn --batch-mode dependency:get -Dartifact=io.prometheus.jmx:jmx_prometheus_javaagent:0.3.1:jar -Ddest=/build/jmx_prometheus_javaagent.jar
+
+    # The preceeding commands build a presto 328. The last stage of Dockerfile.rhel expects this content at 328.0.
+    # This hardlinking allows the CI build and ART production build Dockerfile to be the same.
+    export OUTPUT_VERSION="328"
+    export TARGET_VERSION="328.0"
+    cp -a /build/presto-server/target/presto-server-${OUTPUT_VERSION} /build/presto-server/target/presto-server-${TARGET_VERSION}
+    cp -a /build/presto-cli/target/presto-cli-${OUTPUT_VERSION}-executable.jar /build/presto-cli/target/presto-cli-${TARGET_VERSION}-executable.jar
+
 else
     export PRESTO_VERSION=328.0
     export RH_PRESTO_PATCH_VERSION=00001
