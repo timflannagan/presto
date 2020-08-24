@@ -148,6 +148,7 @@ WORKDIR $PRESTO_HOME
 CMD ["tini", "--", "bin/launcher", "run"]
 
 LABEL io.k8s.display-name="OpenShift Presto" \
-      io.k8s.description="This is an image used by operator-metering to to install and run Presto." \
+      io.k8s.description="This is an image used by the Metering Operator to install and run Presto." \
+      summary="This is an image used by the Metering Operator to install and run Presto." \
       io.openshift.tags="openshift" \
       maintainer="<metering-team@redhat.com>"
