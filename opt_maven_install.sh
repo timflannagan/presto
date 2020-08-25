@@ -7,6 +7,7 @@ if [[ "$1" == "true" ]]; then
 
     yum -y install --setopt=skip_missing_names_on_install=False \
       curl \
+      diffutils \
       java-1.8.0-openjdk \
       java-1.8.0-openjdk-devel
 
