@@ -21,7 +21,7 @@ if [[ "$1" == "true" ]]; then
     # build presto
     cd /build && mvn --batch-mode --errors -Dmaven.javadoc.skip=true -Dmaven.source.skip=true -DskipTests -DfailIfNoTests=false -Dtest=false -DdownloadSources -DdownloadJavadoc clean package -pl '!presto-testing-docker' -Dmaven.repo.local=.m2/repository
     # Install prometheus-jmx agent
-    mvn --batch-mode dependency:get -Dartifact=io.prometheus.jmx:jmx_prometheus_javaagent:0.3.1:jar -Ddest=/build/jmx_prometheus_javaagent.jar
+    mvn --batch-mode dependency:get -Dartifact=io.prometheus.jmx:jmx_prometheus_javaagent:0.3.1:jar -Ddest=/build/jmx_prometheus_javaagent.jar && mv $HOME/.m2/repository/io/prometheus/jmx/jmx_prometheus_javaagent/0.3.1/jmx_prometheus_javaagent-0.3.1.jar /build/jmx_prometheus_javaagent.jar
 
     # The preceeding commands build a presto 328. The last stage of Dockerfile.rhel expects this content at 328.0.
     # This hardlinking allows the CI build and ART production build Dockerfile to be the same.
