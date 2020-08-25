@@ -7,6 +7,7 @@ if [[ "$1" == "true" ]]; then
 
     yum -y install --setopt=skip_missing_names_on_install=False \
       curl \
+      diffutils \
       java-1.8.0-openjdk \
       java-1.8.0-openjdk-devel
 
@@ -18,7 +19,7 @@ if [[ "$1" == "true" ]]; then
     popd
 
     # build presto
-    cd /build && mvn --batch-mode --errors -Dmaven.javadoc.skip=true -Dmaven.source.skip=true -DskipTests -DfailIfNoTests=false -Dtest=false clean package -pl '!presto-testing-docker' -Dmaven.repo.local=.m2/repository
+    cd /build && mvn --batch-mode --errors -Dmaven.javadoc.skip=true -Dmaven.source.skip=true -DskipTests -DfailIfNoTests=false -Dtest=false -DdownloadSources -DdownloadJavadoc clean package -pl '!presto-testing-docker' -Dmaven.repo.local=.m2/repository
     # Install prometheus-jmx agent
     mvn --batch-mode dependency:get -Dartifact=io.prometheus.jmx:jmx_prometheus_javaagent:0.3.1:jar -Ddest=/build/jmx_prometheus_javaagent.jar
 
