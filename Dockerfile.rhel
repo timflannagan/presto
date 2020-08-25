@@ -7,6 +7,9 @@ RUN mkdir -p /build /build/presto-server/target /build/presto-cli/target
 COPY opt_maven_install.sh /tmp/
 RUN chmod u+x /tmp/opt_maven_install.sh && /tmp/opt_maven_install.sh $OPENSHIFT_CI
 
+# Debug check for jmx_prometheus_javaagent missing from the /build/ path
+RUN ls /build/jmx_prometheus_javaagent.jar
+
 FROM registry.svc.ci.openshift.org/ocp/builder:rhel-8-base-openshift-4.6
 
 RUN set -x; \
