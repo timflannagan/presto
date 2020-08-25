@@ -10,7 +10,7 @@ RUN chmod u+x /tmp/opt_maven_install.sh && /tmp/opt_maven_install.sh $OPENSHIFT_
 FROM registry.svc.ci.openshift.org/ocp/builder:rhel-8-base-openshift-4.6
 
 RUN set -x; \
-    INSTALL_PKGS="openssl java-1.8.0-openjdk java-1.8.0-openjdk-devel less rsync tini faq" \
+    INSTALL_PKGS="openssl java-1.8.0-openjdk java-1.8.0-openjdk-devel less rsync tini faq python3" \
     && yum install --setopt=skip_missing_names_on_install=False -y $INSTALL_PKGS \
     && yum clean all \
     && rm -rf /var/cache/yum
