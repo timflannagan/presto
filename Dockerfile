@@ -2,9 +2,10 @@ FROM fedora:28 as build
 
 RUN set -x && \
     INSTALL_PKGS="java-1.8.0-openjdk maven" \
-    && yum clean all && rm -rf /var/cache/yum/* \
+    && yum clean all \
+    && rm -rf /var/cache/yum/* \
     && yum install -y \
-        $INSTALL_PKGS  \
+    $INSTALL_PKGS  \
     && yum clean all \
     && rm -rf /var/cache/yum
 
@@ -92,8 +93,7 @@ FROM centos:7
 
 # go get faq via static Linux binary approach
 ARG LATEST_RELEASE=0.0.6
-RUN curl -Lo /usr/local/bin/faq https://github.com/jzelinskie/faq/releases/download/$LATEST_RELEASE/faq-linux-amd64
-RUN chmod +x /usr/local/bin/faq
+RUN curl -Lo /usr/local/bin/faq https://github.com/jzelinskie/faq/releases/download/$LATEST_RELEASE/faq-linux-amd64 && chmod +x /usr/local/bin/faq
 
 RUN set -x; \
     INSTALL_PKGS="java-1.8.0-openjdk java-1.8.0-openjdk-devel openssl less rsync" \
@@ -110,16 +110,17 @@ RUN chmod +x /usr/bin/tini
 
 RUN mkdir -p /opt/presto
 
-ENV PRESTO_VERSION 328
-ENV PRESTO_HOME /opt/presto/presto-server
-ENV PRESTO_CLI /opt/presto/presto-cli
+ENV PRESTO_VERSION=328 \
+    PRESTO_HOME=/opt/presto/presto-server \
+    PRESTO_CLI=/opt/presto/presto-cli
+
 # Note: podman was having difficulties evaluating the PRESTO_VERSION
 # environment variables: https://github.com/containers/libpod/issues/4878
 ARG PRESTO_VERSION=${PRESTO_VERSION}
-ENV PROMETHEUS_JMX_EXPORTER /opt/jmx_exporter/jmx_exporter.jar
-ENV TERM linux
-ENV HOME /opt/presto
-ENV JAVA_HOME=/etc/alternatives/jre
+ENV PROMETHEUS_JMX_EXPORTER=/opt/jmx_exporter/jmx_exporter.jar \
+    TERM=linux \
+    HOME=/opt/presto \
+    JAVA_HOME=/etc/alternatives/jre
 
 RUN mkdir -p $PRESTO_HOME
 
@@ -148,7 +149,7 @@ WORKDIR $PRESTO_HOME
 CMD ["tini", "--", "bin/launcher", "run"]
 
 LABEL io.k8s.display-name="OpenShift Presto" \
-      io.k8s.description="This is an image used by the Metering Operator to install and run Presto." \
-      summary="This is an image used by the Metering Operator to install and run Presto." \
-      io.openshift.tags="openshift" \
-      maintainer="<metering-team@redhat.com>"
+    io.k8s.description="This is an image used by the Metering Operator to install and run Presto." \
+    summary="This is an image used by the Metering Operator to install and run Presto." \
+    io.openshift.tags="openshift" \
+    maintainer="<metering-team@redhat.com>"
