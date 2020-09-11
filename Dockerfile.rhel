@@ -18,13 +18,7 @@ RUN set -x; \
     && yum clean all \
     && rm -rf /var/cache/yum
 
-# Workaround to RHEL8 not having python by default The current version (328) of the
-# Presto fork uses a python script for it's launcher program, which is supposedly
-# python2 and python3 compatible.
-# 
-# TODO(tflannag): we should move this outside of the conditional build script
-# once ART has moved to RHEL8 images. 
-RUN export OPENSHIFT_CI=${OPENSHIFT_CI:=false}; if [ "$OPENSHIFT_CI" == "true" ]; then alternatives --set python /usr/bin/python3; fi
+RUN alternatives --set python /usr/bin/python3
 RUN python --version
 
 RUN mkdir -p /opt/presto
