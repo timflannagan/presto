@@ -1,4 +1,4 @@
-FROM registry.svc.ci.openshift.org/ocp/builder:rhel-8-base-openshift-4.6 AS build
+FROM registry.svc.ci.openshift.org/ocp/builder:rhel-8-base-openshift-4.7 AS build
 
 RUN mkdir /build
 COPY . /build
@@ -10,7 +10,7 @@ RUN chmod u+x /tmp/opt_maven_install.sh && /tmp/opt_maven_install.sh $OPENSHIFT_
 # Debug check for jmx_prometheus_javaagent missing from the /build/ path
 RUN ls /build/jmx_prometheus_javaagent.jar
 
-FROM registry.svc.ci.openshift.org/ocp/builder:rhel-8-base-openshift-4.6
+FROM registry.svc.ci.openshift.org/ocp/builder:rhel-8-base-openshift-4.7
 
 RUN set -x; \
     INSTALL_PKGS="openssl java-1.8.0-openjdk java-1.8.0-openjdk-devel less rsync tini faq python3" \
