@@ -62,6 +62,7 @@
         <dep.javax-servlet.version>4.0.1</dep.javax-servlet.version>
         <dep.gcs.version>2.0.0</dep.gcs.version>
         <dep.errorprone.version>2.3.3</dep.errorprone.version>
+        <dep.jackson.version>2.10.4</dep.jackson.version>
 
         <!--
           America/Bahia_Banderas has:
@@ -1209,6 +1210,12 @@
             </dependency>
 
             <!-- TODO: remove after updating to Airbase 94 -->
+            <dependency>
+                <groupId>com.fasterxml.jackson.dataformat</groupId>
+                <artifactId>jackson-dataformat-cbor</artifactId>
+                <version>${dep.jackson.version}</version>
+            </dependency>
+
             <dependency>
                 <groupId>javax.annotation</groupId>
                 <artifactId>javax.annotation-api</artifactId>
